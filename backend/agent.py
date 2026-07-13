@@ -1,0 +1,447 @@
+import os
+import json
+import uuid
+import logging
+import asyncio
+from typing import Dict, Any, List, Literal, Union, AsyncGenerator
+from contextlib import asynccontextmanager
+
+import openai
+import anthropic
+
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
+from mcp.client.sse import sse_client
+import mcp.types as types
+
+logger = logging.getLogger("mcp_agent")
+logging.basicConfig(level=logging.INFO)
+
+# ==============================================================================
+# CONFIGURATION
+# ==============================================================================
+TRANSPORT_MODE = os.environ.get("POWERBI_TRANSPORT_MODE", "STDIO") # "SSE" or "STDIO"
+
+# Remote Connection Settings (SSE)
+SSE_URL = os.environ.get("POWERBI_SSE_URL", "https://api.fabric.microsoft.com/v1/mcp/powerbi")
+FABRIC_ACCESS_TOKEN = os.environ.get("FABRIC_ACCESS_TOKEN", "")
+
+# Local Connection Settings (STDIO)
+STDIO_COMMAND = os.environ.get("POWERBI_STDIO_COMMAND", "npx")
+# Microsoft Modeling MCP server startup parameters
+STDIO_ARGS = ["-y", "@microsoft/powerbi-modeling-mcp", "--start"]
+
+# LLM Selection
+LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "openai").lower() # "openai" or "anthropic"
+LLM_MODEL = os.environ.get("LLM_MODEL", "gpt-4o")
+
+# ==============================================================================
+# ELICITATION COORDINATOR (SAFETY APPROVALS)
+# ==============================================================================
+class ElicitationCoordinator:
+    """
+    Coordinates human-in-the-loop approvals between the background MCP ClientSession
+    and the active WebSocket frontend client.
+    """
+    def __init__(self):
+        self._pending_responses: Dict[str, asyncio.Future] = {}
+        self._send_to_client_callback = None
+
+    def set_send_callback(self, callback):
+        """Register the WebSocket send callback."""
+        self._send_to_client_callback = callback
+
+    async def request_elicitation(
+        self,
+        message: str,
+        mode: Literal["form", "url"],
+        schema: Dict[str, Any] = None,
+        url: str = None
+    ) -> Dict[str, Any]:
+        """
+        Called inside the elicitation_callback of the MCP ClientSession.
+        Suspends execution and alerts the WebSocket frontend.
+        """
+        elicitation_id = str(uuid.uuid4())
+        future = asyncio.get_running_loop().create_future()
+        self._pending_responses[elicitation_id] = future
+
+        payload = {
+            "type": "elicitation_request",
+            "id": elicitation_id,
+            "mode": mode,
+            "message": message,
+            "schema": schema,
+            "url": url
+        }
+
+        logger.info(f"Suspending tool execution for safety approval. ID: {elicitation_id}")
+
+        if self._send_to_client_callback:
+            # Send elicitation request to the WebSocket frontend
+            await self._send_to_client_callback(payload)
+        else:
+            logger.warning("No active WebSocket client. Automatically declining safety prompt.")
+            return {"action": "decline", "content": None}
+
+        try:
+            # Wait for response from frontend
+            result = await future
+            logger.info(f"Safety approval response received for ID: {elicitation_id} -> {result['action']}")
+            return result
+        except Exception as e:
+            logger.error(f"Error waiting for elicitation response: {e}")
+            return {"action": "decline", "content": None}
+        finally:
+            self._pending_responses.pop(elicitation_id, None)
+
+    def submit_response(self, elicitation_id: str, action: str, content: Any):
+        """
+        Called when the WebSocket endpoint receives the user's action.
+        """
+        future = self._pending_responses.get(elicitation_id)
+        if future and not future.done():
+            future.set_result({
+                "action": action,
+                "content": content
+            })
+
+def create_elicitation_callback(coordinator: ElicitationCoordinator):
+    """Factory to create a callback matching ElicitationFnT."""
+    async def callback(context, params: Union[types.ElicitRequestFormParams, types.ElicitRequestURLParams]) -> types.ElicitResult:
+        mode = params.mode
+        message = params.message
+        schema = getattr(params, "requestedSchema", None)
+        url = getattr(params, "url", None)
+
+        result = await coordinator.request_elicitation(
+            message=message,
+            mode=mode,
+            schema=schema,
+            url=url
+        )
+
+        return types.ElicitResult(
+            action=result["action"],
+            content=result["content"]
+        )
+    return callback
+
+# ==============================================================================
+# DUAL-TRANSPORT MCP CLIENT SESSION
+# ==============================================================================
+@asynccontextmanager
+async def mcp_session_scope(coordinator: ElicitationCoordinator) -> AsyncGenerator[ClientSession, None]:
+    """
+    Context manager to yield an initialized ClientSession based on the
+    TRANSPORT_MODE configuration (SSE or STDIO).
+    """
+    elicitation_cb = create_elicitation_callback(coordinator)
+    
+    if TRANSPORT_MODE.upper() == "SSE":
+        logger.info(f"Connecting to remote Power BI server via SSE: {SSE_URL}")
+        headers = {}
+        if FABRIC_ACCESS_TOKEN:
+            headers["Authorization"] = f"Bearer {FABRIC_ACCESS_TOKEN}"
+        
+        async with sse_client(url=SSE_URL, headers=headers) as (read_stream, write_stream):
+            async with ClientSession(read_stream, write_stream, elicitation_callback=elicitation_cb) as session:
+                await session.initialize()
+                yield session
+    else:
+        logger.info(f"Connecting to local Power BI modeling server via STDIO. Executable: {STDIO_COMMAND}")
+        server_params = StdioServerParameters(
+            command=STDIO_COMMAND,
+            args=STDIO_ARGS,
+            env=None
+        )
+        async with stdio_client(server_params) as (read_stream, write_stream):
+            async with ClientSession(read_stream, write_stream, elicitation_callback=elicitation_cb) as session:
+                await session.initialize()
+                yield session
+
+# ==============================================================================
+# TOOL SCHEMAS MAPPING
+# ==============================================================================
+def map_mcp_tools_to_openai(mcp_tools: types.ListToolsResult) -> List[Dict[str, Any]]:
+    """Convert MCP schemas to OpenAI tool schemas."""
+    openai_tools = []
+    for tool in mcp_tools.tools:
+        openai_tools.append({
+            "type": "function",
+            "function": {
+                "name": tool.name,
+                "description": tool.description or "",
+                "parameters": tool.inputSchema
+            }
+        })
+    return openai_tools
+
+def map_mcp_tools_to_anthropic(mcp_tools: types.ListToolsResult) -> List[Dict[str, Any]]:
+    """Convert MCP schemas to Anthropic tool schemas."""
+    anthropic_tools = []
+    for tool in mcp_tools.tools:
+        anthropic_tools.append({
+            "name": tool.name,
+            "description": tool.description or "",
+            "input_schema": tool.inputSchema
+        })
+    return anthropic_tools
+
+# ==============================================================================
+# AGENT EXECUTION LOOP
+# ==============================================================================
+async def run_agent_loop(
+    query: str,
+    session: ClientSession,
+    llm_provider: str = LLM_PROVIDER,
+    llm_model: str = LLM_MODEL
+) -> AsyncGenerator[Dict[str, Any], None]:
+    """
+    Main asynchronous agent execution generator. Streams responses and tool states
+    back to the caller.
+    """
+    mcp_tools = await session.list_tools()
+    
+    # Initialize LLM Clients
+    openai_client = openai.AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY", ""))
+    anthropic_client = anthropic.AsyncAnthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
+
+    messages = [{"role": "user", "content": query}]
+
+    # Loop to support multi-turn reasoning and tool calling
+    while True:
+        if llm_provider == "openai":
+            # Map tools
+            openai_tools = map_mcp_tools_to_openai(mcp_tools)
+            
+            # Call OpenAI (Streaming)
+            logger.info("Calling OpenAI Chat Completion...")
+            tool_calls_accumulator = {}
+            text_accumulator = []
+
+            stream = await openai_client.chat.completions.create(
+                model=llm_model,
+                messages=messages,
+                tools=openai_tools if openai_tools else None,
+                stream=True
+            )
+
+            async for chunk in stream:
+                delta = chunk.choices[0].delta
+                if delta.content:
+                    text_accumulator.append(delta.content)
+                    yield {"type": "token", "text": delta.content}
+
+                if delta.tool_calls:
+                    for tc in delta.tool_calls:
+                        index = tc.index
+                        if index not in tool_calls_accumulator:
+                            tool_calls_accumulator[index] = {
+                                "id": tc.id,
+                                "type": tc.type,
+                                "function": {"name": "", "arguments": ""}
+                            }
+                        if tc.id:
+                            tool_calls_accumulator[index]["id"] = tc.id
+                        if tc.function:
+                            if tc.function.name:
+                                tool_calls_accumulator[index]["function"]["name"] = tc.function.name
+                            if tc.function.arguments:
+                                tool_calls_accumulator[index]["function"]["arguments"] += tc.function.arguments
+
+            # Process any tool calls accumulated
+            if tool_calls_accumulator:
+                tool_calls_list = []
+                formatted_tool_calls_payload = []
+                
+                for idx, tc in sorted(tool_calls_accumulator.items()):
+                    openai_tc = openai.types.chat.chat_completion_message_tool_call.ChatCompletionMessageToolCall(
+                        id=tc["id"],
+                        type="function",
+                        function=openai.types.chat.chat_completion_message_tool_call.Function(
+                            name=tc["function"]["name"],
+                            arguments=tc["function"]["arguments"]
+                        )
+                    )
+                    tool_calls_list.append(openai_tc)
+                    formatted_tool_calls_payload.append({
+                        "id": tc["id"],
+                        "name": tc["function"]["name"],
+                        "arguments": json.loads(tc["function"]["arguments"])
+                    })
+
+                # Append assistant message with tool calls to context
+                messages.append({
+                    "role": "assistant",
+                    "content": "".join(text_accumulator) or None,
+                    "tool_calls": tool_calls_list
+                })
+
+                # Alert client of tool starts
+                yield {"type": "tool_start", "calls": formatted_tool_calls_payload}
+
+                # Execute tool calls
+                for tc in tool_calls_list:
+                    tool_name = tc.function.name
+                    tool_args = json.loads(tc.function.arguments)
+                    
+                    try:
+                        logger.info(f"Executing tool {tool_name} with args {tool_args}")
+                        tool_result = await session.call_tool(tool_name, tool_args)
+                        
+                        # Serialize result content
+                        content_str = ""
+                        for item in tool_result.content:
+                            if item.type == "text":
+                                content_str += item.text
+                            else:
+                                content_str += f"[{item.type} content]"
+                                
+                        yield {"type": "tool_result", "id": tc.id, "name": tool_name, "result": content_str}
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tc.id,
+                            "name": tool_name,
+                            "content": content_str
+                        })
+                    except Exception as e:
+                        logger.error(f"Error executing tool {tool_name}: {e}")
+                        yield {"type": "tool_result", "id": tc.id, "name": tool_name, "error": str(e)}
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tc.id,
+                            "name": tool_name,
+                            "content": f"Error executing tool: {str(e)}"
+                        })
+                # Re-loop to feed tool results back to OpenAI
+                continue
+            else:
+                # Execution complete
+                break
+
+        elif llm_provider == "anthropic":
+            # Map tools
+            anthropic_tools = map_mcp_tools_to_anthropic(mcp_tools)
+            
+            # Convert messages structure for Anthropic
+            # Anthropic expects 'user' and 'assistant' roles, with tool blocks
+            anthropic_messages = []
+            for msg in messages:
+                role = msg["role"]
+                # Convert 'tool' role messages to tool_result content in Anthropic
+                if role == "tool":
+                    anthropic_messages.append({
+                        "role": "user",
+                        "content": [{
+                            "type": "tool_result",
+                            "tool_use_id": msg["tool_call_id"],
+                            "content": msg["content"]
+                        }]
+                    })
+                elif role == "assistant" and "tool_calls" in msg and msg["tool_calls"]:
+                    # Convert tool calls to Anthropic tool_use blocks
+                    content = []
+                    if msg.get("content"):
+                        content.append({"type": "text", "text": msg["content"]})
+                    for tc in msg["tool_calls"]:
+                        content.append({
+                            "type": "tool_use",
+                            "id": tc.id,
+                            "name": tc.function.name,
+                            "input": json.loads(tc.function.arguments)
+                        })
+                    anthropic_messages.append({"role": "assistant", "content": content})
+                else:
+                    anthropic_messages.append({"role": role, "content": msg["content"]})
+
+            # Call Anthropic (Streaming)
+            logger.info("Calling Anthropic messages stream...")
+            content_accumulator = []
+            tool_calls_accumulator = {}
+
+            # Wrap async context manager
+            async with anthropic_client.messages.stream(
+                model=llm_model,
+                max_tokens=4000,
+                messages=anthropic_messages,
+                tools=anthropic_tools if anthropic_tools else None
+            ) as stream:
+                async for event in stream:
+                    if event.type == "text":
+                        yield {"type": "token", "text": event.text}
+                        content_accumulator.append({"type": "text", "text": event.text})
+                    elif event.type == "tool_use":
+                        tool_calls_accumulator[event.id] = {
+                            "id": event.id,
+                            "name": event.name,
+                            "input": event.input
+                        }
+
+            if tool_calls_accumulator:
+                # Map to standard OpenAI-style messages for internal state tracking
+                standard_tc_list = []
+                formatted_tool_calls_payload = []
+                
+                for tc_id, tc in tool_calls_accumulator.items():
+                    standard_tc_list.append(
+                        openai.types.chat.chat_completion_message_tool_call.ChatCompletionMessageToolCall(
+                            id=tc_id,
+                            type="function",
+                            function=openai.types.chat.chat_completion_message_tool_call.Function(
+                                name=tc["name"],
+                                arguments=json.dumps(tc["input"])
+                            )
+                        )
+                    )
+                    formatted_tool_calls_payload.append({
+                        "id": tc_id,
+                        "name": tc["name"],
+                        "arguments": tc["input"]
+                    })
+
+                messages.append({
+                    "role": "assistant",
+                    "content": "".join([c["text"] for c in content_accumulator if c["type"] == "text"]) or None,
+                    "tool_calls": standard_tc_list
+                })
+
+                yield {"type": "tool_start", "calls": formatted_tool_calls_payload}
+
+                # Run tools
+                for tc_id, tc in tool_calls_accumulator.items():
+                    tool_name = tc["name"]
+                    tool_args = tc["input"]
+                    try:
+                        logger.info(f"Executing tool {tool_name} with args {tool_args}")
+                        tool_result = await session.call_tool(tool_name, tool_args)
+                        
+                        content_str = ""
+                        for item in tool_result.content:
+                            if item.type == "text":
+                                content_str += item.text
+                            else:
+                                content_str += f"[{item.type} content]"
+                                
+                        yield {"type": "tool_result", "id": tc_id, "name": tool_name, "result": content_str}
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tc_id,
+                            "name": tool_name,
+                            "content": content_str
+                        })
+                    except Exception as e:
+                        logger.error(f"Error executing tool {tool_name}: {e}")
+                        yield {"type": "tool_result", "id": tc_id, "name": tool_name, "error": str(e)}
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tc_id,
+                            "name": tool_name,
+                            "content": f"Error executing tool: {str(e)}"
+                        })
+                # Re-loop to feed tool results to Anthropic
+                continue
+            else:
+                break
+        else:
+            raise ValueError(f"Unknown LLM provider: {llm_provider}")

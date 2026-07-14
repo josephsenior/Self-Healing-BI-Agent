@@ -53,6 +53,7 @@ Your capabilities include:
 - Evaluating and applying modeling best practices
 
 Guidelines:
+- **Connection Rule**: Before executing any model operations (like listing tables, getting measures, executing DAX queries), you MUST verify that you are connected. If you get a "No connectionName provided" or "no last used connection available" error, you must first call `connection_operations` with `ListLocalInstances` to list all running local instances, and then call `connection_operations` with `Connect` specifying the connectionName or port of the active instance.
 - Always validate DAX syntax before executing queries.
 - When modifying a model, explain what you are about to change and why.
 - Present query results in clear, formatted tables when possible.
@@ -297,10 +298,13 @@ async def run_agent_loop(
                             tool_calls_accumulator[index] = {
                                 "id": tc.id,
                                 "type": tc.type,
-                                "function": {"name": "", "arguments": ""}
+                                "function": {"name": "", "arguments": ""},
+                                "extra_content": None
                             }
                         if tc.id:
                             tool_calls_accumulator[index]["id"] = tc.id
+                        if hasattr(tc, "extra_content") and tc.extra_content:
+                            tool_calls_accumulator[index]["extra_content"] = tc.extra_content
                         if tc.function:
                             if tc.function.name:
                                 tool_calls_accumulator[index]["function"]["name"] = tc.function.name
@@ -313,15 +317,18 @@ async def run_agent_loop(
                 formatted_tool_calls_payload = []
 
                 for idx, tc in sorted(tool_calls_accumulator.items()):
-                    openai_tc = openai.types.chat.chat_completion_message_tool_call.ChatCompletionMessageToolCall(
-                        id=tc["id"],
-                        type="function",
-                        function=openai.types.chat.chat_completion_message_tool_call.Function(
-                            name=tc["function"]["name"],
-                            arguments=tc["function"]["arguments"]
-                        )
-                    )
-                    tool_calls_list.append(openai_tc)
+                    tool_call_dict = {
+                        "id": tc["id"],
+                        "type": "function",
+                        "function": {
+                            "name": tc["function"]["name"],
+                            "arguments": tc["function"]["arguments"]
+                        }
+                    }
+                    if tc.get("extra_content"):
+                        tool_call_dict["extra_content"] = tc["extra_content"]
+                    
+                    tool_calls_list.append(tool_call_dict)
                     formatted_tool_calls_payload.append({
                         "id": tc["id"],
                         "name": tc["function"]["name"],
@@ -340,8 +347,9 @@ async def run_agent_loop(
 
                 # Execute tool calls
                 for tc in tool_calls_list:
-                    tool_name = tc.function.name
-                    tool_args = json.loads(tc.function.arguments)
+                    tool_name = tc["function"]["name"]
+                    tool_args = json.loads(tc["function"]["arguments"])
+                    tc_id = tc["id"]
 
                     try:
                         logger.info(f"Executing tool {tool_name} with args {tool_args}")
@@ -355,19 +363,19 @@ async def run_agent_loop(
                             else:
                                 content_str += f"[{item.type} content]"
 
-                        yield {"type": "tool_result", "id": tc.id, "name": tool_name, "result": content_str}
+                        yield {"type": "tool_result", "id": tc_id, "name": tool_name, "result": content_str}
                         messages.append({
                             "role": "tool",
-                            "tool_call_id": tc.id,
+                            "tool_call_id": tc_id,
                             "name": tool_name,
                             "content": content_str
                         })
                     except Exception as e:
                         logger.error(f"Error executing tool {tool_name}: {e}")
-                        yield {"type": "tool_result", "id": tc.id, "name": tool_name, "error": str(e)}
+                        yield {"type": "tool_result", "id": tc_id, "name": tool_name, "error": str(e)}
                         messages.append({
                             "role": "tool",
-                            "tool_call_id": tc.id,
+                            "tool_call_id": tc_id,
                             "name": tool_name,
                             "content": f"Error executing tool: {str(e)}"
                         })

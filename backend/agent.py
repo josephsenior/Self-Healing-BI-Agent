@@ -173,11 +173,29 @@ async def mcp_session_scope(coordinator: ElicitationCoordinator) -> AsyncGenerat
                 await session.initialize()
                 yield session
     else:
-        logger.info(f"Connecting to local Power BI modeling server via STDIO. Executable: {config.stdio_command}")
+        import os
+        import shutil
+        stdio_cmd = config.stdio_command
+        if os.name == "nt" and not stdio_cmd.endswith((".exe", ".cmd", ".bat")):
+            for ext in (".cmd", ".bat", ".exe"):
+                if shutil.which(stdio_cmd + ext):
+                    stdio_cmd = stdio_cmd + ext
+                    break
+            if not stdio_cmd.endswith((".cmd", ".bat", ".exe")):
+                default_node_npx = os.path.join("C:\\Program Files\\nodejs", stdio_cmd + ".cmd")
+                if os.path.exists(default_node_npx):
+                    stdio_cmd = default_node_npx
+        
+        # Prepend Node.js directory to PATH to avoid 'node' command not found errors
+        node_dir = r"C:\Program Files\nodejs"
+        custom_env = os.environ.copy()
+        custom_env["PATH"] = node_dir + os.pathsep + custom_env.get("PATH", "")
+
+        logger.info(f"Connecting to local Power BI modeling server via STDIO. Executable: {stdio_cmd}")
         server_params = StdioServerParameters(
-            command=config.stdio_command,
+            command=stdio_cmd,
             args=config.stdio_args,
-            env=None
+            env=custom_env
         )
         async with stdio_client(server_params) as (read_stream, write_stream):
             async with ClientSession(read_stream, write_stream, elicitation_callback=elicitation_cb) as session:

@@ -28,10 +28,11 @@ class AgentConfig(BaseSettings):
     fabric_access_token: str = Field(default="", alias="FABRIC_ACCESS_TOKEN")
     stdio_command: str = Field(default="npx", alias="POWERBI_STDIO_COMMAND")
     stdio_args: list[str] = ["-y", "@microsoft/powerbi-modeling-mcp", "--start"]
-    llm_provider: str = Field(default="openai", alias="LLM_PROVIDER")
-    llm_model: str = Field(default="gpt-4o", alias="LLM_MODEL")
+    llm_provider: str = Field(default="gemini", alias="LLM_PROVIDER")
+    llm_model: str = Field(default="gemini-2.5-flash", alias="LLM_MODEL")
     openai_api_key: str = Field(default="", alias="OPENAI_API_KEY")
     anthropic_api_key: str = Field(default="", alias="ANTHROPIC_API_KEY")
+    gemini_api_key: str = Field(default="", alias="GEMINI_API_KEY")
 
     model_config = {"env_file": ".env", "extra": "ignore", "populate_by_name": True}
 
@@ -235,6 +236,10 @@ async def run_agent_loop(
     # Initialize LLM Clients
     openai_client = openai.AsyncOpenAI(api_key=config.openai_api_key)
     anthropic_client = anthropic.AsyncAnthropic(api_key=config.anthropic_api_key)
+    gemini_client = openai.AsyncOpenAI(
+        api_key=config.gemini_api_key,
+        base_url="https://generativelanguage.googleapis.com/v1beta/openai/"
+    )
 
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
@@ -243,7 +248,116 @@ async def run_agent_loop(
 
     # Loop to support multi-turn reasoning and tool calling
     while True:
-        if llm_provider == "openai":
+        if llm_provider == "gemini":
+            # Map tools
+            openai_tools = map_mcp_tools_to_openai(mcp_tools)
+
+            # Call Gemini (Streaming)
+            logger.info("Calling Gemini Chat Completion...")
+            tool_calls_accumulator = {}
+            text_accumulator = []
+
+            stream = await gemini_client.chat.completions.create(
+                model=llm_model,
+                messages=messages,
+                tools=openai_tools if openai_tools else None,
+                stream=True
+            )
+
+            async for chunk in stream:
+                delta = chunk.choices[0].delta
+                if delta.content:
+                    text_accumulator.append(delta.content)
+                    yield {"type": "token", "text": delta.content}
+
+                if delta.tool_calls:
+                    for tc in delta.tool_calls:
+                        index = tc.index
+                        if index not in tool_calls_accumulator:
+                            tool_calls_accumulator[index] = {
+                                "id": tc.id,
+                                "type": tc.type,
+                                "function": {"name": "", "arguments": ""}
+                            }
+                        if tc.id:
+                            tool_calls_accumulator[index]["id"] = tc.id
+                        if tc.function:
+                            if tc.function.name:
+                                tool_calls_accumulator[index]["function"]["name"] = tc.function.name
+                            if tc.function.arguments:
+                                tool_calls_accumulator[index]["function"]["arguments"] += tc.function.arguments
+
+            # Process any tool calls accumulated
+            if tool_calls_accumulator:
+                tool_calls_list = []
+                formatted_tool_calls_payload = []
+
+                for idx, tc in sorted(tool_calls_accumulator.items()):
+                    openai_tc = openai.types.chat.chat_completion_message_tool_call.ChatCompletionMessageToolCall(
+                        id=tc["id"],
+                        type="function",
+                        function=openai.types.chat.chat_completion_message_tool_call.Function(
+                            name=tc["function"]["name"],
+                            arguments=tc["function"]["arguments"]
+                        )
+                    )
+                    tool_calls_list.append(openai_tc)
+                    formatted_tool_calls_payload.append({
+                        "id": tc["id"],
+                        "name": tc["function"]["name"],
+                        "arguments": json.loads(tc["function"]["arguments"])
+                    })
+
+                # Append assistant message with tool calls to context
+                messages.append({
+                    "role": "assistant",
+                    "content": "".join(text_accumulator) or None,
+                    "tool_calls": tool_calls_list
+                })
+
+                # Alert client of tool starts
+                yield {"type": "tool_start", "calls": formatted_tool_calls_payload}
+
+                # Execute tool calls
+                for tc in tool_calls_list:
+                    tool_name = tc.function.name
+                    tool_args = json.loads(tc.function.arguments)
+
+                    try:
+                        logger.info(f"Executing tool {tool_name} with args {tool_args}")
+                        tool_result = await session.call_tool(tool_name, tool_args)
+
+                        # Serialize result content
+                        content_str = ""
+                        for item in tool_result.content:
+                            if item.type == "text":
+                                content_str += item.text
+                            else:
+                                content_str += f"[{item.type} content]"
+
+                        yield {"type": "tool_result", "id": tc.id, "name": tool_name, "result": content_str}
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tc.id,
+                            "name": tool_name,
+                            "content": content_str
+                        })
+                    except Exception as e:
+                        logger.error(f"Error executing tool {tool_name}: {e}")
+                        yield {"type": "tool_result", "id": tc.id, "name": tool_name, "error": str(e)}
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tc.id,
+                            "name": tool_name,
+                            "content": f"Error executing tool: {str(e)}"
+                        })
+                # Re-loop to feed tool results back to Gemini
+                continue
+            else:
+                # Execution complete
+                break
+
+        elif llm_provider == "openai":
             # Map tools
             openai_tools = map_mcp_tools_to_openai(mcp_tools)
 

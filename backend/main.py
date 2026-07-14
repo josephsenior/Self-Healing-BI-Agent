@@ -1,4 +1,3 @@
-import os
 import json
 import logging
 import asyncio
@@ -8,7 +7,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from backend.agent import (
     ElicitationCoordinator,
     mcp_session_scope,
-    run_agent_loop
+    run_agent_loop,
+    config,
 )
 
 logger = logging.getLogger("mcp_server")
@@ -19,21 +19,54 @@ app = FastAPI(title="Power BI MCP Agent Backend")
 # Enable CORS for the frontend dev server
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # In production, restrict this to the frontend URL
+    allow_origins=["*"],  # In production, restrict this to the frontend URL
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# ==============================================================================
+# STARTUP EVENT
+# ==============================================================================
+@app.on_event("startup")
+async def log_startup_config():
+    """Log the active configuration at startup (secrets are masked)."""
+    logger.info("=== Power BI MCP Agent — Starting Up ===")
+    logger.info(f"  LLM Provider   : {config.llm_provider}")
+    logger.info(f"  LLM Model      : {config.llm_model}")
+    logger.info(f"  Transport Mode : {config.transport_mode}")
+    if config.transport_mode.upper() == "SSE":
+        logger.info(f"  SSE URL        : {config.sse_url}")
+    else:
+        logger.info(f"  STDIO Command  : {config.stdio_command}")
+    logger.info("========================================")
+
+# ==============================================================================
+# REST ENDPOINTS
+# ==============================================================================
 @app.get("/api/health")
 async def health_check():
     """Simple API check for frontend routing tests."""
     return {
         "status": "healthy",
-        "llm_provider": os.environ.get("LLM_PROVIDER", "openai"),
-        "transport_mode": os.environ.get("POWERBI_TRANSPORT_MODE", "STDIO")
+        "llm_provider": config.llm_provider,
+        "llm_model": config.llm_model,
+        "transport_mode": config.transport_mode,
     }
 
+@app.get("/api/config")
+async def get_config():
+    """Return safe (non-secret) configuration details."""
+    return {
+        "llm_provider": config.llm_provider,
+        "llm_model": config.llm_model,
+        "transport_mode": config.transport_mode,
+        "sse_url": config.sse_url if config.transport_mode.upper() == "SSE" else None,
+    }
+
+# ==============================================================================
+# WEBSOCKET CHAT ENDPOINT
+# ==============================================================================
 @app.websocket("/ws/chat")
 async def websocket_chat(websocket: WebSocket):
     """
@@ -59,15 +92,15 @@ async def websocket_chat(websocket: WebSocket):
     async def execute_agent(query_text: str):
         try:
             await websocket.send_json({"type": "status", "status": "starting_agent"})
-            
+
             # Establish the MCP connection scope
             async with mcp_session_scope(coordinator) as session:
                 await websocket.send_json({"type": "status", "status": "mcp_connected"})
-                
+
                 # Run the LLM/Agent tool loop
                 async for event in run_agent_loop(query_text, session):
                     await websocket.send_json(event)
-                    
+
             await websocket.send_json({"type": "complete"})
         except asyncio.CancelledError:
             logger.info("Agent task was cancelled by client.")
@@ -104,8 +137,8 @@ async def websocket_chat(websocket: WebSocket):
             elif msg_type == "elicitation_response":
                 elicit_id = message.get("id")
                 action = message.get("action")   # 'accept', 'decline', 'cancel'
-                content = message.get("content") # form payload dictionary or empty dict
-                
+                content = message.get("content")  # form payload dictionary or empty dict
+
                 logger.info(f"Submitting elicitation response. ID: {elicit_id}, Action: {action}")
                 coordinator.submit_response(elicit_id, action, content)
 

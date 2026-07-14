@@ -1,4 +1,3 @@
-import os
 import json
 import uuid
 import logging
@@ -9,6 +8,9 @@ from contextlib import asynccontextmanager
 import openai
 import anthropic
 
+from pydantic_settings import BaseSettings
+from pydantic import Field
+
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from mcp.client.sse import sse_client
@@ -18,22 +20,41 @@ logger = logging.getLogger("mcp_agent")
 logging.basicConfig(level=logging.INFO)
 
 # ==============================================================================
-# CONFIGURATION
+# CONFIGURATION (Pydantic Settings — reads from .env + environment)
 # ==============================================================================
-TRANSPORT_MODE = os.environ.get("POWERBI_TRANSPORT_MODE", "STDIO") # "SSE" or "STDIO"
+class AgentConfig(BaseSettings):
+    transport_mode: str = Field(default="STDIO", alias="POWERBI_TRANSPORT_MODE")
+    sse_url: str = Field(default="https://api.fabric.microsoft.com/v1/mcp/powerbi", alias="POWERBI_SSE_URL")
+    fabric_access_token: str = Field(default="", alias="FABRIC_ACCESS_TOKEN")
+    stdio_command: str = Field(default="npx", alias="POWERBI_STDIO_COMMAND")
+    stdio_args: list[str] = ["-y", "@microsoft/powerbi-modeling-mcp", "--start"]
+    llm_provider: str = Field(default="openai", alias="LLM_PROVIDER")
+    llm_model: str = Field(default="gpt-4o", alias="LLM_MODEL")
+    openai_api_key: str = Field(default="", alias="OPENAI_API_KEY")
+    anthropic_api_key: str = Field(default="", alias="ANTHROPIC_API_KEY")
 
-# Remote Connection Settings (SSE)
-SSE_URL = os.environ.get("POWERBI_SSE_URL", "https://api.fabric.microsoft.com/v1/mcp/powerbi")
-FABRIC_ACCESS_TOKEN = os.environ.get("FABRIC_ACCESS_TOKEN", "")
+    model_config = {"env_file": ".env", "extra": "ignore", "populate_by_name": True}
 
-# Local Connection Settings (STDIO)
-STDIO_COMMAND = os.environ.get("POWERBI_STDIO_COMMAND", "npx")
-# Microsoft Modeling MCP server startup parameters
-STDIO_ARGS = ["-y", "@microsoft/powerbi-modeling-mcp", "--start"]
+config = AgentConfig()
 
-# LLM Selection
-LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "openai").lower() # "openai" or "anthropic"
-LLM_MODEL = os.environ.get("LLM_MODEL", "gpt-4o")
+# ==============================================================================
+# SYSTEM PROMPT
+# ==============================================================================
+SYSTEM_PROMPT = """You are an expert Power BI data analyst and semantic model engineer.
+You have access to Microsoft Power BI tools via the Model Context Protocol (MCP).
+
+Your capabilities include:
+- Executing DAX queries against semantic models
+- Inspecting model metadata (tables, columns, measures, relationships)
+- Creating and modifying measures, calculated columns, and tables
+- Evaluating and applying modeling best practices
+
+Guidelines:
+- Always validate DAX syntax before executing queries.
+- When modifying a model, explain what you are about to change and why.
+- Present query results in clear, formatted tables when possible.
+- If a tool call fails, diagnose the error and suggest a fix.
+- Be concise but thorough in your explanations."""
 
 # ==============================================================================
 # ELICITATION COORDINATOR (SAFETY APPROVALS)
@@ -134,25 +155,25 @@ def create_elicitation_callback(coordinator: ElicitationCoordinator):
 async def mcp_session_scope(coordinator: ElicitationCoordinator) -> AsyncGenerator[ClientSession, None]:
     """
     Context manager to yield an initialized ClientSession based on the
-    TRANSPORT_MODE configuration (SSE or STDIO).
+    transport_mode configuration (SSE or STDIO).
     """
     elicitation_cb = create_elicitation_callback(coordinator)
-    
-    if TRANSPORT_MODE.upper() == "SSE":
-        logger.info(f"Connecting to remote Power BI server via SSE: {SSE_URL}")
+
+    if config.transport_mode.upper() == "SSE":
+        logger.info(f"Connecting to remote Power BI server via SSE: {config.sse_url}")
         headers = {}
-        if FABRIC_ACCESS_TOKEN:
-            headers["Authorization"] = f"Bearer {FABRIC_ACCESS_TOKEN}"
-        
-        async with sse_client(url=SSE_URL, headers=headers) as (read_stream, write_stream):
+        if config.fabric_access_token:
+            headers["Authorization"] = f"Bearer {config.fabric_access_token}"
+
+        async with sse_client(url=config.sse_url, headers=headers) as (read_stream, write_stream):
             async with ClientSession(read_stream, write_stream, elicitation_callback=elicitation_cb) as session:
                 await session.initialize()
                 yield session
     else:
-        logger.info(f"Connecting to local Power BI modeling server via STDIO. Executable: {STDIO_COMMAND}")
+        logger.info(f"Connecting to local Power BI modeling server via STDIO. Executable: {config.stdio_command}")
         server_params = StdioServerParameters(
-            command=STDIO_COMMAND,
-            args=STDIO_ARGS,
+            command=config.stdio_command,
+            args=config.stdio_args,
             env=None
         )
         async with stdio_client(server_params) as (read_stream, write_stream):
@@ -194,27 +215,38 @@ def map_mcp_tools_to_anthropic(mcp_tools: types.ListToolsResult) -> List[Dict[st
 async def run_agent_loop(
     query: str,
     session: ClientSession,
-    llm_provider: str = LLM_PROVIDER,
-    llm_model: str = LLM_MODEL
+    llm_provider: str = None,
+    llm_model: str = None
 ) -> AsyncGenerator[Dict[str, Any], None]:
     """
     Main asynchronous agent execution generator. Streams responses and tool states
     back to the caller.
     """
-    mcp_tools = await session.list_tools()
-    
-    # Initialize LLM Clients
-    openai_client = openai.AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY", ""))
-    anthropic_client = anthropic.AsyncAnthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
+    # Fall back to config values when not explicitly provided
+    llm_provider = llm_provider or config.llm_provider
+    llm_model = llm_model or config.llm_model
 
-    messages = [{"role": "user", "content": query}]
+    mcp_tools = await session.list_tools()
+
+    # Emit tools_discovered event for the frontend
+    tool_names = [t.name for t in mcp_tools.tools]
+    yield {"type": "tools_discovered", "tools": tool_names, "count": len(tool_names)}
+
+    # Initialize LLM Clients
+    openai_client = openai.AsyncOpenAI(api_key=config.openai_api_key)
+    anthropic_client = anthropic.AsyncAnthropic(api_key=config.anthropic_api_key)
+
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": query}
+    ]
 
     # Loop to support multi-turn reasoning and tool calling
     while True:
         if llm_provider == "openai":
             # Map tools
             openai_tools = map_mcp_tools_to_openai(mcp_tools)
-            
+
             # Call OpenAI (Streaming)
             logger.info("Calling OpenAI Chat Completion...")
             tool_calls_accumulator = {}
@@ -254,7 +286,7 @@ async def run_agent_loop(
             if tool_calls_accumulator:
                 tool_calls_list = []
                 formatted_tool_calls_payload = []
-                
+
                 for idx, tc in sorted(tool_calls_accumulator.items()):
                     openai_tc = openai.types.chat.chat_completion_message_tool_call.ChatCompletionMessageToolCall(
                         id=tc["id"],
@@ -285,11 +317,11 @@ async def run_agent_loop(
                 for tc in tool_calls_list:
                     tool_name = tc.function.name
                     tool_args = json.loads(tc.function.arguments)
-                    
+
                     try:
                         logger.info(f"Executing tool {tool_name} with args {tool_args}")
                         tool_result = await session.call_tool(tool_name, tool_args)
-                        
+
                         # Serialize result content
                         content_str = ""
                         for item in tool_result.content:
@@ -297,7 +329,7 @@ async def run_agent_loop(
                                 content_str += item.text
                             else:
                                 content_str += f"[{item.type} content]"
-                                
+
                         yield {"type": "tool_result", "id": tc.id, "name": tool_name, "result": content_str}
                         messages.append({
                             "role": "tool",
@@ -323,12 +355,16 @@ async def run_agent_loop(
         elif llm_provider == "anthropic":
             # Map tools
             anthropic_tools = map_mcp_tools_to_anthropic(mcp_tools)
-            
+
             # Convert messages structure for Anthropic
             # Anthropic expects 'user' and 'assistant' roles, with tool blocks
+            # Filter out system messages — Anthropic uses the `system` parameter instead
             anthropic_messages = []
             for msg in messages:
                 role = msg["role"]
+                # Skip system messages — passed via the `system` parameter
+                if role == "system":
+                    continue
                 # Convert 'tool' role messages to tool_result content in Anthropic
                 if role == "tool":
                     anthropic_messages.append({
@@ -363,7 +399,8 @@ async def run_agent_loop(
             # Wrap async context manager
             async with anthropic_client.messages.stream(
                 model=llm_model,
-                max_tokens=4000,
+                max_tokens=4096,
+                system=SYSTEM_PROMPT,
                 messages=anthropic_messages,
                 tools=anthropic_tools if anthropic_tools else None
             ) as stream:
@@ -382,7 +419,7 @@ async def run_agent_loop(
                 # Map to standard OpenAI-style messages for internal state tracking
                 standard_tc_list = []
                 formatted_tool_calls_payload = []
-                
+
                 for tc_id, tc in tool_calls_accumulator.items():
                     standard_tc_list.append(
                         openai.types.chat.chat_completion_message_tool_call.ChatCompletionMessageToolCall(
@@ -415,14 +452,14 @@ async def run_agent_loop(
                     try:
                         logger.info(f"Executing tool {tool_name} with args {tool_args}")
                         tool_result = await session.call_tool(tool_name, tool_args)
-                        
+
                         content_str = ""
                         for item in tool_result.content:
                             if item.type == "text":
                                 content_str += item.text
                             else:
                                 content_str += f"[{item.type} content]"
-                                
+
                         yield {"type": "tool_result", "id": tc_id, "name": tool_name, "result": content_str}
                         messages.append({
                             "role": "tool",

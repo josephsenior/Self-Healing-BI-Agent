@@ -35,6 +35,26 @@ export default function Home() {
       .catch(() => setAgentConfig(null));
   }, []);
 
+  const handleConfigUpdate = async (newConfig: AgentConfig) => {
+    try {
+      const res = await fetch("http://localhost:8000/api/config", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(newConfig),
+      });
+      if (res.ok) {
+        const updatedConfig = await res.json();
+        setAgentConfig(updatedConfig);
+        return true;
+      }
+    } catch (err) {
+      console.error("Error updating config:", err);
+    }
+    return false;
+  };
+
   // Auto-scroll messages
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -97,6 +117,7 @@ export default function Home() {
         agentConfig={agentConfig}
         discoveredTools={discoveredTools}
         onReconnect={reconnect}
+        onConfigUpdate={handleConfigUpdate}
       />
 
       {/* Main content area */}

@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 import openai
 import anthropic
 
+from pathlib import Path
 from pydantic_settings import BaseSettings
 from pydantic import Field
 
@@ -19,9 +20,10 @@ import mcp.types as types
 logger = logging.getLogger("mcp_agent")
 logging.basicConfig(level=logging.INFO)
 
-# ==============================================================================
-# CONFIGURATION (Pydantic Settings — reads from .env + environment)
-# ==============================================================================
+# Resolve the absolute path to the root .env file (one level above backend/agent.py)
+ROOT_DIR = Path(__file__).resolve().parent.parent
+ENV_FILE = ROOT_DIR / ".env"
+
 class AgentConfig(BaseSettings):
     transport_mode: str = Field(default="STDIO", alias="POWERBI_TRANSPORT_MODE")
     sse_url: str = Field(default="https://api.fabric.microsoft.com/v1/mcp/powerbi", alias="POWERBI_SSE_URL")
@@ -34,7 +36,7 @@ class AgentConfig(BaseSettings):
     anthropic_api_key: str = Field(default="", alias="ANTHROPIC_API_KEY")
     gemini_api_key: str = Field(default="", alias="GEMINI_API_KEY")
 
-    model_config = {"env_file": ".env", "extra": "ignore", "populate_by_name": True}
+    model_config = {"env_file": str(ENV_FILE), "extra": "ignore", "populate_by_name": True}
 
 config = AgentConfig()
 

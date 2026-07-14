@@ -3,6 +3,8 @@ import logging
 import asyncio
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+
 
 from backend.agent import (
     ElicitationCoordinator,
@@ -63,6 +65,35 @@ async def get_config():
         "transport_mode": config.transport_mode,
         "sse_url": config.sse_url if config.transport_mode.upper() == "SSE" else None,
     }
+
+class ConfigUpdateRequest(BaseModel):
+    llm_provider: str
+    llm_model: str
+    transport_mode: str
+    sse_url: str | None = None
+
+@app.post("/api/config")
+async def update_config(req: ConfigUpdateRequest):
+    """Update active configuration details in-memory."""
+    config.llm_provider = req.llm_provider.lower()
+    config.llm_model = req.llm_model
+    config.transport_mode = req.transport_mode.upper()
+    if req.sse_url is not None:
+        config.sse_url = req.sse_url
+    
+    logger.info("=== Config Updated dynamically ===")
+    logger.info(f"  LLM Provider   : {config.llm_provider}")
+    logger.info(f"  LLM Model      : {config.llm_model}")
+    logger.info(f"  Transport Mode : {config.transport_mode}")
+    logger.info("==================================")
+    
+    return {
+        "llm_provider": config.llm_provider,
+        "llm_model": config.llm_model,
+        "transport_mode": config.transport_mode,
+        "sse_url": config.sse_url if config.transport_mode.upper() == "SSE" else None,
+    }
+
 
 # ==============================================================================
 # WEBSOCKET CHAT ENDPOINT

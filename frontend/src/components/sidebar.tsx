@@ -1,7 +1,7 @@
 "use client";
 
-import React from "react";
-import { Cpu, RefreshCw, Shield } from "lucide-react";
+import React, { useState, useEffect } from "react";
+import { Cpu, RefreshCw, Shield, Settings, Save, X, Loader2 } from "lucide-react";
 import type { ConnectionStatus, AgentConfig } from "@/types";
 
 interface SidebarProps {
@@ -9,6 +9,7 @@ interface SidebarProps {
   agentConfig: AgentConfig | null;
   discoveredTools: string[];
   onReconnect: () => void;
+  onConfigUpdate: (newConfig: AgentConfig) => Promise<boolean>;
 }
 
 export function Sidebar({
@@ -16,7 +17,69 @@ export function Sidebar({
   agentConfig,
   discoveredTools,
   onReconnect,
+  onConfigUpdate,
 }: SidebarProps) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [provider, setProvider] = useState("");
+  const [model, setModel] = useState("");
+  const [transport, setTransport] = useState("");
+  const [sseUrl, setSseUrl] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+  const [errorMsg, setErrorMsg] = useState("");
+
+  // Sync form states with agentConfig when entering edit mode or when agentConfig changes
+  useEffect(() => {
+    if (agentConfig) {
+      setProvider(agentConfig.llm_provider);
+      setModel(agentConfig.llm_model);
+      setTransport(agentConfig.transport_mode);
+      setSseUrl(agentConfig.sse_url || "");
+    }
+  }, [agentConfig, isEditing]);
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!provider || !model || !transport) {
+      setErrorMsg("All fields are required");
+      return;
+    }
+    if (transport.toUpperCase() === "SSE" && !sseUrl) {
+      setErrorMsg("SSE URL is required for SSE transport");
+      return;
+    }
+
+    setIsSaving(true);
+    setErrorMsg("");
+    try {
+      const success = await onConfigUpdate({
+        llm_provider: provider.toLowerCase(),
+        llm_model: model,
+        transport_mode: transport.toUpperCase(),
+        sse_url: transport.toUpperCase() === "SSE" ? sseUrl : null,
+      });
+      if (success) {
+        setIsEditing(false);
+      } else {
+        setErrorMsg("Failed to update config");
+      }
+    } catch (err) {
+      setErrorMsg("An error occurred while saving");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const selectProviderModelDefault = (selectedProvider: string) => {
+    setProvider(selectedProvider);
+    if (selectedProvider === "gemini") {
+      setModel("gemini-2.5-flash");
+    } else if (selectedProvider === "openai") {
+      setModel("gpt-4o");
+    } else if (selectedProvider === "anthropic") {
+      setModel("claude-3-5-sonnet-latest");
+    }
+  };
+
   const statusDot = () => {
     switch (connectionStatus) {
       case "connected":
@@ -88,26 +151,138 @@ export function Sidebar({
 
         {/* Configuration */}
         <div className="bg-white rounded-lg p-3 border border-zinc-200 shadow-sm space-y-2.5">
-          <h2 className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider">
-            Configuration
-          </h2>
+          <div className="flex items-center justify-between">
+            <h2 className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider">
+              Configuration
+            </h2>
+            {agentConfig && !isEditing && (
+              <button
+                onClick={() => setIsEditing(true)}
+                className="p-1 text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100 rounded transition-colors"
+                title="Edit Configuration"
+              >
+                <Settings className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+
           {agentConfig ? (
-            <div className="space-y-1.5 text-[11px]">
-              <div className="flex justify-between">
-                <span className="text-zinc-500">LLM Provider</span>
-                <span className="font-mono text-zinc-800 font-medium capitalize">
-                  {agentConfig.llm_provider}
-                </span>
+            isEditing ? (
+              <form onSubmit={handleSave} className="space-y-3 text-[11px]">
+                {errorMsg && (
+                  <div className="text-[10px] text-red-500 bg-red-50 p-1.5 rounded border border-red-100">
+                    {errorMsg}
+                  </div>
+                )}
+                
+                <div className="space-y-1">
+                  <label className="text-zinc-400 font-medium">LLM Provider</label>
+                  <select
+                    value={provider}
+                    onChange={(e) => selectProviderModelDefault(e.target.value)}
+                    disabled={isSaving}
+                    className="w-full bg-zinc-50 border border-zinc-200 rounded px-2 py-1 text-zinc-800 focus:outline-none focus:border-orange-500 font-mono text-[11px] h-7"
+                  >
+                    <option value="gemini">Gemini</option>
+                    <option value="openai">OpenAI</option>
+                    <option value="anthropic">Anthropic</option>
+                  </select>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-zinc-400 font-medium">Model</label>
+                  <input
+                    type="text"
+                    value={model}
+                    onChange={(e) => setModel(e.target.value)}
+                    disabled={isSaving}
+                    placeholder="e.g. gpt-4o"
+                    className="w-full bg-zinc-50 border border-zinc-200 rounded px-2 py-1 text-zinc-800 focus:outline-none focus:border-orange-500 font-mono text-[11px] h-7"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-zinc-400 font-medium">Transport</label>
+                  <select
+                    value={transport}
+                    onChange={(e) => setTransport(e.target.value)}
+                    disabled={isSaving}
+                    className="w-full bg-zinc-50 border border-zinc-200 rounded px-2 py-1 text-zinc-800 focus:outline-none focus:border-orange-500 font-mono text-[11px] h-7"
+                  >
+                    <option value="STDIO">STDIO</option>
+                    <option value="SSE">SSE</option>
+                  </select>
+                </div>
+
+                {transport.toUpperCase() === "SSE" && (
+                  <div className="space-y-1">
+                    <label className="text-zinc-400 font-medium">SSE URL</label>
+                    <input
+                      type="text"
+                      value={sseUrl}
+                      onChange={(e) => setSseUrl(e.target.value)}
+                      disabled={isSaving}
+                      placeholder="https://..."
+                      className="w-full bg-zinc-50 border border-zinc-200 rounded px-2 py-1 text-zinc-800 focus:outline-none focus:border-orange-500 font-mono text-[11px] h-7"
+                    />
+                  </div>
+                )}
+
+                <div className="flex gap-2 pt-1">
+                  <button
+                    type="submit"
+                    disabled={isSaving}
+                    className="flex-1 flex items-center justify-center gap-1 bg-orange-500 hover:bg-orange-600 text-white font-medium rounded py-1 text-[10px] transition-colors shadow-sm disabled:opacity-50 h-7"
+                  >
+                    {isSaving ? (
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                    ) : (
+                      <>
+                        <Save className="w-3 h-3" />
+                        <span>Save</span>
+                      </>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsEditing(false);
+                      setErrorMsg("");
+                    }}
+                    disabled={isSaving}
+                    className="flex-1 flex items-center justify-center gap-1 bg-zinc-100 hover:bg-zinc-200 text-zinc-700 font-medium rounded py-1 text-[10px] border border-zinc-200 transition-colors h-7"
+                  >
+                    <X className="w-3 h-3" />
+                    <span>Cancel</span>
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <div className="space-y-1.5 text-[11px]">
+                <div className="flex justify-between">
+                  <span className="text-zinc-500">LLM Provider</span>
+                  <span className="font-mono text-zinc-800 font-medium capitalize">
+                    {agentConfig.llm_provider}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-zinc-500">Model</span>
+                  <span className="font-mono text-zinc-800 font-medium">{agentConfig.llm_model}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-zinc-500">Transport</span>
+                  <span className="font-mono text-zinc-800 font-medium">{agentConfig.transport_mode}</span>
+                </div>
+                {agentConfig.transport_mode.toUpperCase() === "SSE" && agentConfig.sse_url && (
+                  <div className="flex flex-col gap-0.5 pt-1 border-t border-zinc-100 mt-1">
+                    <span className="text-zinc-400">SSE URL</span>
+                    <span className="font-mono text-zinc-650 truncate max-w-full text-[10px]" title={agentConfig.sse_url}>
+                      {agentConfig.sse_url}
+                    </span>
+                  </div>
+                )}
               </div>
-              <div className="flex justify-between">
-                <span className="text-zinc-500">Model</span>
-                <span className="font-mono text-zinc-800 font-medium">{agentConfig.llm_model}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-zinc-500">Transport</span>
-                <span className="font-mono text-zinc-800 font-medium">{agentConfig.transport_mode}</span>
-              </div>
-            </div>
+            )
           ) : (
             <p className="text-[11px] text-zinc-400 italic">No config loaded</p>
           )}

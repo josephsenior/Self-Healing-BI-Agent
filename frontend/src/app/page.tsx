@@ -53,34 +53,34 @@ export default function Home() {
         return null;
       case "starting_agent":
         return (
-          <div className="flex items-center gap-2 px-3 py-1 bg-zinc-900 rounded-full border border-zinc-800 text-xs text-zinc-300">
-            <RefreshCw className="w-3 h-3 animate-spin text-zinc-400" />
+          <div className="flex items-center gap-2 px-3 py-1 bg-zinc-100 rounded-full border border-zinc-200 text-xs text-zinc-700">
+            <RefreshCw className="w-3 h-3 animate-spin text-zinc-500" />
             <span>Starting Agent</span>
           </div>
         );
       case "mcp_connected":
         return (
-          <div className="flex items-center gap-2 px-3 py-1 bg-zinc-900 rounded-full border border-zinc-800 text-xs text-zinc-300">
-            <RefreshCw className="w-3 h-3 animate-spin text-zinc-400" />
+          <div className="flex items-center gap-2 px-3 py-1 bg-zinc-100 rounded-full border border-zinc-200 text-xs text-zinc-700">
+            <RefreshCw className="w-3 h-3 animate-spin text-zinc-500" />
             <span>MCP Connected</span>
           </div>
         );
       case "running":
         return (
-          <div className="flex items-center gap-2 px-3 py-1 bg-zinc-900 rounded-full border border-zinc-800 text-xs text-zinc-300">
-            <RefreshCw className="w-3 h-3 animate-spin text-zinc-400" />
+          <div className="flex items-center gap-2 px-3 py-1 bg-zinc-100 rounded-full border border-zinc-200 text-xs text-zinc-700">
+            <RefreshCw className="w-3 h-3 animate-spin text-zinc-500" />
             <span>Running</span>
           </div>
         );
       case "complete":
         return (
-          <div className="flex items-center gap-2 px-3 py-1 bg-zinc-950 rounded-full border border-zinc-800 text-xs text-zinc-300">
+          <div className="flex items-center gap-2 px-3 py-1 bg-zinc-100 rounded-full border border-zinc-200 text-xs text-zinc-700">
             <span>Complete</span>
           </div>
         );
       case "error":
         return (
-          <div className="flex items-center gap-2 px-3 py-1 bg-zinc-900 rounded-full border border-zinc-800 text-xs text-zinc-300">
+          <div className="flex items-center gap-2 px-3 py-1 bg-red-50 border border-red-100 text-xs text-red-700">
             <span>Error</span>
           </div>
         );
@@ -90,7 +90,7 @@ export default function Home() {
   };
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-zinc-950 text-zinc-100 font-sans">
+    <div className="flex h-screen w-screen overflow-hidden bg-white text-zinc-900 font-sans">
       {/* Sidebar */}
       <Sidebar
         connectionStatus={connectionStatus}
@@ -100,12 +100,12 @@ export default function Home() {
       />
 
       {/* Main content area */}
-      <div className="flex-1 flex flex-col relative min-w-0 bg-zinc-900/10">
+      <div className="flex-1 flex flex-col relative min-w-0 bg-zinc-50/30">
         {/* Top navbar */}
-        <div className="h-14 border-b border-zinc-800 bg-zinc-950 flex items-center px-6 justify-between flex-shrink-0">
+        <div className="h-14 border-b border-zinc-200 bg-white flex items-center px-6 justify-between flex-shrink-0">
           <div className="flex items-center gap-2">
-            <Terminal className="w-4 h-4 text-zinc-400" />
-            <span className="text-sm font-semibold text-zinc-300">Console</span>
+            <Terminal className="w-4 h-4 text-orange-500" />
+            <span className="text-sm font-semibold text-zinc-800">Console</span>
           </div>
           {statusDisplay()}
         </div>
@@ -113,10 +113,10 @@ export default function Home() {
         {/* Scrollable messages */}
         <div className="flex-1 overflow-y-auto p-6 space-y-4">
           {messages.length === 0 ? (
-            <div className="h-full flex flex-col items-center justify-center text-zinc-500 space-y-3">
-              <MessageSquare className="w-12 h-12 text-zinc-600" />
-              <p className="text-sm font-medium text-zinc-400">Start a conversation</p>
-              <p className="text-xs text-zinc-500 max-w-xs text-center">
+            <div className="h-full flex flex-col items-center justify-center text-zinc-400 space-y-3">
+              <MessageSquare className="w-12 h-12 text-zinc-300" />
+              <p className="text-sm font-medium text-zinc-700">Start a conversation</p>
+              <p className="text-xs text-zinc-400 max-w-xs text-center">
                 Ask questions about your Power BI data models, run analyses, or request schema modifications.
               </p>
             </div>
@@ -129,8 +129,8 @@ export default function Home() {
           {/* Active tool calls */}
           {activeToolCalls.length > 0 && (
             <div className="animate-fade-in">
-              <div className="max-w-[75%] rounded-lg p-4 bg-zinc-900 border border-zinc-800 space-y-2">
-                <div className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-2">
+              <div className="max-w-[75%] rounded-lg p-4 bg-zinc-100/50 border border-zinc-200 space-y-2">
+                <div className="text-[11px] font-semibold text-zinc-450 uppercase tracking-wider mb-2">
                   Processing
                 </div>
                 {activeToolCalls.map((tc) => (

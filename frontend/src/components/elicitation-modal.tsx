@@ -24,23 +24,23 @@ export function ElicitationModal({ elicitation, onRespond }: ElicitationModalPro
   });
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-6 z-50">
-      <div className="w-full max-w-lg rounded-lg bg-zinc-950 border border-zinc-800 p-6 space-y-5 shadow-2xl animate-slide-up">
+    <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center p-6 z-50">
+      <div className="w-full max-w-lg rounded-lg bg-white border border-zinc-200 p-6 space-y-5 shadow-2xl animate-slide-up">
         {/* Header */}
-        <div className="flex items-center gap-3 border-b border-zinc-800 pb-4">
-          <div className="p-2 bg-zinc-900 rounded-lg border border-zinc-800">
-            <ShieldAlert className="w-5 h-5 text-zinc-100" />
+        <div className="flex items-center gap-3 border-b border-zinc-200 pb-4">
+          <div className="p-2 bg-orange-50 rounded-lg border border-orange-100">
+            <ShieldAlert className="w-5 h-5 text-orange-500" />
           </div>
           <div>
-            <h3 className="font-semibold text-zinc-100 text-base">Human Approval Required</h3>
-            <p className="text-[11px] text-zinc-500 uppercase tracking-wide">
+            <h3 className="font-semibold text-zinc-900 text-base">Human Approval Required</h3>
+            <p className="text-[11px] text-zinc-400 uppercase tracking-wide">
               Enterprise Write Safety Guard
             </p>
           </div>
         </div>
 
         {/* Message */}
-        <div className="text-sm text-zinc-300 leading-relaxed bg-zinc-900/40 p-4 rounded-lg border border-zinc-800 border-l-2 border-l-zinc-500">
+        <div className="text-sm text-zinc-700 leading-relaxed bg-zinc-50 p-4 rounded-lg border border-zinc-200 border-l-2 border-l-orange-500">
           {elicitation.message}
         </div>
 
@@ -51,23 +51,23 @@ export function ElicitationModal({ elicitation, onRespond }: ElicitationModalPro
               const isRequired = elicitation.schema?.required?.includes(key);
               return (
                 <div key={key} className="space-y-1.5">
-                  <label className="text-[11px] font-semibold text-zinc-400 flex justify-between">
+                  <label className="text-[11px] font-semibold text-zinc-500 flex justify-between">
                     <span>{prop.description ?? key}</span>
                     {isRequired && (
-                      <span className="text-zinc-500 text-[10px]">Required</span>
+                      <span className="text-red-500 text-[10px]">Required</span>
                     )}
                   </label>
                   {prop.type === "boolean" ? (
-                    <div className="flex items-center gap-3 bg-zinc-900/30 p-3 rounded-lg border border-zinc-800">
+                    <div className="flex items-center gap-3 bg-zinc-50 p-3 rounded-lg border border-zinc-200">
                       <input
                         type="checkbox"
                         checked={Boolean(formData[key])}
                         onChange={(e) =>
                           setFormData((prev) => ({ ...prev, [key]: e.target.checked }))
                         }
-                        className="w-4 h-4 text-zinc-100 bg-zinc-950 border-zinc-800 rounded focus:ring-zinc-550"
+                        className="w-4 h-4 text-orange-600 bg-white border-zinc-200 rounded focus:ring-orange-500"
                       />
-                      <span className="text-xs text-zinc-300">Enable / Approve</span>
+                      <span className="text-xs text-zinc-650">Enable / Approve</span>
                     </div>
                   ) : (
                     <input
@@ -76,7 +76,7 @@ export function ElicitationModal({ elicitation, onRespond }: ElicitationModalPro
                       onChange={(e) =>
                         setFormData((prev) => ({ ...prev, [key]: e.target.value }))
                       }
-                      className="w-full bg-zinc-900 border border-zinc-800 rounded-lg p-2.5 text-xs text-zinc-300 focus:outline-none focus:border-zinc-700 transition-colors"
+                      className="w-full bg-zinc-50 border border-zinc-200 rounded-lg p-2.5 text-xs text-zinc-800 focus:outline-none focus:border-orange-500 transition-colors"
                       placeholder={`Enter ${key}...`}
                     />
                   )}
@@ -89,14 +89,14 @@ export function ElicitationModal({ elicitation, onRespond }: ElicitationModalPro
         {/* URL mode */}
         {elicitation.mode === "url" && elicitation.url && (
           <div className="space-y-2">
-            <p className="text-xs text-zinc-400">
+            <p className="text-xs text-zinc-500">
               Visit the URL below to authenticate or grant consent:
             </p>
             <a
               href={elicitation.url}
               target="_blank"
               rel="noreferrer"
-              className="flex items-center gap-2 text-zinc-300 hover:text-zinc-100 underline text-xs font-semibold transition-colors"
+              className="flex items-center gap-2 text-orange-600 hover:text-orange-700 underline text-xs font-semibold transition-colors"
             >
               <LinkIcon className="w-4 h-4" />
               <span>Open Elicitation URL</span>
@@ -105,16 +105,16 @@ export function ElicitationModal({ elicitation, onRespond }: ElicitationModalPro
         )}
 
         {/* Footer buttons */}
-        <div className="flex gap-3 pt-4 border-t border-zinc-800 justify-end text-xs font-semibold">
+        <div className="flex gap-3 pt-4 border-t border-zinc-200 justify-end text-xs font-semibold">
           <button
             onClick={() => onRespond("decline", {})}
-            className="px-4 py-2.5 bg-transparent border border-zinc-800 text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200 rounded-lg transition-colors"
+            className="px-4 py-2.5 bg-transparent border border-zinc-200 text-zinc-650 hover:bg-zinc-50 hover:text-zinc-900 rounded-lg transition-colors"
           >
             Decline
           </button>
           <button
             onClick={() => onRespond("accept", formData)}
-            className="px-5 py-2.5 bg-zinc-100 hover:bg-zinc-200 text-zinc-900 border border-zinc-200 rounded-lg transition-colors flex items-center gap-1.5"
+            className="px-5 py-2.5 bg-orange-500 hover:bg-orange-600 text-white border border-orange-600 rounded-lg transition-colors flex items-center gap-1.5 shadow-sm"
           >
             <CheckCircle className="w-4 h-4" />
             <span>Approve</span>

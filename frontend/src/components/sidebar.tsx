@@ -21,17 +21,17 @@ export function Sidebar({
     switch (connectionStatus) {
       case "connected":
         return (
-          <span className="relative flex h-2.5 w-2.5">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500" />
+          <span className="relative flex h-2 w-2">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-zinc-400 opacity-75" />
+            <span className="relative inline-flex rounded-full h-2 w-2 bg-zinc-100" />
           </span>
         );
       case "connecting":
-        return <span className="h-2.5 w-2.5 rounded-full bg-yellow-500 animate-pulse" />;
+        return <span className="h-2 w-2 rounded-full bg-zinc-500 animate-pulse" />;
       case "error":
-        return <span className="h-2.5 w-2.5 rounded-full bg-red-500" />;
+        return <span className="h-2 w-2 rounded-full bg-zinc-600" />;
       default:
-        return <span className="h-2.5 w-2.5 rounded-full bg-red-500" />;
+        return <span className="h-2 w-2 rounded-full bg-zinc-600" />;
     }
   };
 
@@ -49,35 +49,35 @@ export function Sidebar({
   };
 
   return (
-    <aside className="w-[280px] flex-shrink-0 border-r border-slate-800/50 bg-[#080d1a] flex flex-col justify-between h-screen overflow-hidden">
+    <aside className="w-[280px] flex-shrink-0 border-r border-zinc-800 bg-zinc-950 flex flex-col justify-between h-screen overflow-hidden text-zinc-400">
       <div className="p-5 space-y-5 overflow-y-auto flex-1">
         {/* Header */}
         <div className="flex items-center gap-3">
-          <div className="p-2.5 bg-blue-600/20 text-blue-400 rounded-xl border border-blue-500/30">
+          <div className="p-2 bg-zinc-900 text-zinc-100 rounded-lg border border-zinc-800">
             <Cpu className="w-5 h-5" />
           </div>
           <div>
-            <h1 className="font-bold text-sm text-slate-100 tracking-wide">
+            <h1 className="font-semibold text-sm text-zinc-100 tracking-tight">
               Power BI MCP Agent
             </h1>
-            <p className="text-[11px] text-slate-500">Autonomous Data Analysis</p>
+            <p className="text-[11px] text-zinc-500">Autonomous Data Analysis</p>
           </div>
         </div>
 
         {/* Connection Status */}
-        <div className="bg-slate-900/50 rounded-lg p-3 border border-slate-800/50 space-y-2.5">
-          <h2 className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
+        <div className="bg-zinc-900/40 rounded-lg p-3 border border-zinc-800/80 space-y-2.5">
+          <h2 className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">
             Connection
           </h2>
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               {statusDot()}
-              <span className="text-xs font-medium text-slate-300">{statusText()}</span>
+              <span className="text-xs font-medium text-zinc-300">{statusText()}</span>
             </div>
             {(connectionStatus === "disconnected" || connectionStatus === "error") && (
               <button
                 onClick={onReconnect}
-                className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 rounded-md transition-colors"
+                className="p-1.5 bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 rounded-md border border-zinc-800 transition-colors"
                 title="Reconnect"
               >
                 <RefreshCw className="w-3.5 h-3.5" />
@@ -87,40 +87,40 @@ export function Sidebar({
         </div>
 
         {/* Configuration */}
-        <div className="bg-slate-900/50 rounded-lg p-3 border border-slate-800/50 space-y-2.5">
-          <h2 className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
+        <div className="bg-zinc-900/40 rounded-lg p-3 border border-zinc-800/80 space-y-2.5">
+          <h2 className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">
             Configuration
           </h2>
           {agentConfig ? (
             <div className="space-y-1.5 text-[11px]">
               <div className="flex justify-between">
-                <span className="text-slate-500">LLM Provider</span>
-                <span className="font-mono text-blue-400 capitalize">
+                <span className="text-zinc-500">LLM Provider</span>
+                <span className="font-mono text-zinc-300 capitalize">
                   {agentConfig.llm_provider}
                 </span>
               </div>
               <div className="flex justify-between">
-                <span className="text-slate-500">Model</span>
-                <span className="font-mono text-purple-400">{agentConfig.llm_model}</span>
+                <span className="text-zinc-500">Model</span>
+                <span className="font-mono text-zinc-300">{agentConfig.llm_model}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-slate-500">Transport</span>
-                <span className="font-mono text-cyan-400">{agentConfig.transport_mode}</span>
+                <span className="text-zinc-500">Transport</span>
+                <span className="font-mono text-zinc-300">{agentConfig.transport_mode}</span>
               </div>
             </div>
           ) : (
-            <p className="text-[11px] text-slate-600 italic">No config loaded</p>
+            <p className="text-[11px] text-zinc-600 italic">No config loaded</p>
           )}
         </div>
 
         {/* Discovered Tools */}
-        <div className="bg-slate-900/50 rounded-lg p-3 border border-slate-800/50 space-y-2.5">
+        <div className="bg-zinc-900/40 rounded-lg p-3 border border-zinc-800/80 space-y-2.5">
           <div className="flex items-center justify-between">
-            <h2 className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
+            <h2 className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">
               Discovered Tools
             </h2>
             {discoveredTools.length > 0 && (
-              <span className="text-[10px] font-mono bg-blue-500/15 text-blue-400 px-1.5 py-0.5 rounded-full border border-blue-500/20">
+              <span className="text-[10px] font-mono bg-zinc-900 text-zinc-300 px-1.5 py-0.5 rounded-full border border-zinc-800">
                 {discoveredTools.length}
               </span>
             )}
@@ -130,21 +130,21 @@ export function Sidebar({
               {discoveredTools.map((tool) => (
                 <span
                   key={tool}
-                  className="inline-block text-[10px] font-mono bg-slate-800/80 text-slate-400 px-2 py-0.5 rounded-md mr-1 mb-1 border border-slate-700/40"
+                  className="inline-block text-[10px] font-mono bg-zinc-900 text-zinc-400 px-2 py-0.5 rounded-md mr-1 mb-1 border border-zinc-800"
                 >
                   {tool}
                 </span>
               ))}
             </div>
           ) : (
-            <p className="text-[11px] text-slate-600 italic">Connect to discover tools</p>
+            <p className="text-[11px] text-zinc-600 italic">Connect to discover tools</p>
           )}
         </div>
       </div>
 
       {/* Footer */}
-      <div className="p-4 border-t border-slate-800/50 flex items-center gap-2 text-[10px] text-slate-600">
-        <Shield className="w-3.5 h-3.5 text-emerald-600" />
+      <div className="p-4 border-t border-zinc-800 flex items-center gap-2 text-[10px] text-zinc-500">
+        <Shield className="w-3.5 h-3.5 text-zinc-400" />
         <span>Enterprise Safety · Human-in-the-Loop</span>
       </div>
     </aside>

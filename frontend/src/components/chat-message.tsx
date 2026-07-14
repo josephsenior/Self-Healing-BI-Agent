@@ -23,30 +23,30 @@ export function ChatMessageBubble({ message }: ChatMessageBubbleProps) {
       className={`flex w-full animate-fade-in ${isUser ? "justify-end" : "justify-start"}`}
     >
       <div
-        className={`max-w-[75%] rounded-xl p-4 border text-sm leading-relaxed ${
+        className={`max-w-[75%] rounded-lg p-4 border text-sm leading-relaxed ${
           isUser
-            ? "bg-blue-600/8 border-l-2 border-l-blue-500 border-slate-800/60"
-            : "bg-slate-900/60 border-l-2 border-l-purple-500 border-slate-800/60"
+            ? "bg-zinc-900 border border-zinc-800 text-zinc-100"
+            : "bg-zinc-900/60 border border-zinc-800/80 text-zinc-100"
         }`}
       >
         {/* Header: role + timestamp */}
         <div className="flex items-center justify-between mb-2">
           <span
             className={`text-[11px] font-semibold uppercase tracking-wider ${
-              isUser ? "text-blue-400" : "text-purple-400"
+              isUser ? "text-zinc-300" : "text-zinc-400"
             }`}
           >
             {isUser ? "You" : "Agent"}
           </span>
-          <span className="text-[10px] text-slate-600 font-mono ml-4">{formattedTime}</span>
+          <span className="text-[10px] text-zinc-500 font-mono ml-4">{formattedTime}</span>
         </div>
 
         {/* Message content */}
-        <div className="whitespace-pre-wrap text-slate-200">{message.content}</div>
+        <div className="whitespace-pre-wrap text-zinc-300">{message.content}</div>
 
         {/* Tool calls attached to this message */}
         {message.toolCalls && message.toolCalls.length > 0 && (
-          <div className="mt-3 pt-3 border-t border-slate-800/60 space-y-2">
+          <div className="mt-3 pt-3 border-t border-zinc-800 space-y-2">
             {message.toolCalls.map((tc) => (
               <ToolCallCard key={tc.id} toolCall={tc} />
             ))}

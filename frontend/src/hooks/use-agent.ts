@@ -159,9 +159,7 @@ export function useAgent(url: string): UseAgentReturn {
 
     ws.onopen = () => {
       setConnectionStatus("connected");
-      if (agentStatus === "error") {
-        setAgentStatus("idle");
-      }
+      setAgentStatus((prev) => (prev === "error" ? "idle" : prev));
     };
 
     ws.onclose = () => {
@@ -177,7 +175,7 @@ export function useAgent(url: string): UseAgentReturn {
     };
 
     ws.onmessage = handleMessage;
-  }, [url, handleMessage, agentStatus]);
+  }, [url, handleMessage]);
 
   // Connect on mount, cleanup on unmount
   useEffect(() => {

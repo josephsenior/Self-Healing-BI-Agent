@@ -204,33 +204,44 @@ async def mcp_session_scope(coordinator: ElicitationCoordinator) -> AsyncGenerat
         is_npx = "npx" in stdio_cmd.lower()
         use_fast_startup = is_npx and config.stdio_args and "@microsoft/powerbi-modeling-mcp" in config.stdio_args
 
-        if use_fast_startup:
-            try:
-                logger.info("Attempting fast startup with --no-install...")
-                fast_args = ["--no-install"] + [arg for arg in config.stdio_args if arg != "-y"]
-                server_params = StdioServerParameters(
-                    command=stdio_cmd,
-                    args=fast_args,
-                    env=custom_env
-                )
-                async with stdio_client(server_params) as (read_stream, write_stream):
-                    async with ClientSession(read_stream, write_stream, elicitation_callback=elicitation_cb) as session:
-                        await session.initialize()
-                        logger.info("Fast startup succeeded.")
-                        yield session
-                        return
-            except Exception as e:
-                logger.warning(f"Fast startup failed: {e}. Falling back to standard startup...")
+        try:
+            if use_fast_startup:
+                try:
+                    logger.info("Attempting fast startup with --no-install...")
+                    fast_args = ["--no-install"] + [arg for arg in config.stdio_args if arg != "-y"]
+                    server_params = StdioServerParameters(
+                        command=stdio_cmd,
+                        args=fast_args,
+                        env=custom_env
+                    )
+                    async with stdio_client(server_params) as (read_stream, write_stream):
+                        async with ClientSession(read_stream, write_stream, elicitation_callback=elicitation_cb) as session:
+                            await session.initialize()
+                            logger.info("Fast startup succeeded.")
+                            try:
+                                yield session
+                            except (GeneratorExit, asyncio.CancelledError):
+                                logger.info("Session context generator exited or cancelled.")
+                            return
+                except Exception as e:
+                    logger.warning(f"Fast startup failed: {e}. Falling back to standard startup...")
 
-        server_params = StdioServerParameters(
-            command=stdio_cmd,
-            args=config.stdio_args,
-            env=custom_env
-        )
-        async with stdio_client(server_params) as (read_stream, write_stream):
-            async with ClientSession(read_stream, write_stream, elicitation_callback=elicitation_cb) as session:
-                await session.initialize()
-                yield session
+            server_params = StdioServerParameters(
+                command=stdio_cmd,
+                args=config.stdio_args,
+                env=custom_env
+            )
+            async with stdio_client(server_params) as (read_stream, write_stream):
+                async with ClientSession(read_stream, write_stream, elicitation_callback=elicitation_cb) as session:
+                    await session.initialize()
+                    try:
+                        yield session
+                    except (GeneratorExit, asyncio.CancelledError):
+                        logger.info("Session context generator exited or cancelled.")
+        except BaseExceptionGroup as eg:
+            logger.info("Handled TaskGroup exception group during session cleanup.")
+        except Exception as e:
+            logger.error(f"Error in session scope: {e}")
 
 # ==============================================================================
 # TOOL SCHEMAS MAPPING

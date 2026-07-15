@@ -318,6 +318,7 @@ def map_mcp_tools_to_anthropic(mcp_tools: types.ListToolsResult) -> List[Dict[st
 async def run_agent_loop(
     query: str,
     session: ClientSession,
+    history: list = None,
     llm_provider: str = None,
     llm_model: str = None,
     reasoning_effort: str = None
@@ -393,7 +394,7 @@ async def run_agent_loop(
             if active_conn:
                 conn_name = active_conn.get("connectionName") or "Power BI Model"
                 # 3. Discover tables in the model to inject into System Prompt
-                tables_res = await session.call_tool("table_operations", {"request": {"operation": "GetAllTables"}})
+                tables_res = await session.call_tool("table_operations", {"request": {"operation": "LIST"}})
                 tables_data = json.loads(tables_res.content[0].text)
                 tables_list = tables_data.get("data") if isinstance(tables_data, dict) else tables_data
                 
@@ -405,7 +406,7 @@ async def run_agent_loop(
                 measures_list = []
                 if "measure_operations" in tool_names:
                     try:
-                        measures_res = await session.call_tool("measure_operations", {"request": {"operation": "GetAllMeasures"}})
+                        measures_res = await session.call_tool("measure_operations", {"request": {"operation": "LIST"}})
                         measures_data = json.loads(measures_res.content[0].text)
                         m_list = measures_data.get("data") if isinstance(measures_data, dict) else measures_data
                         if isinstance(m_list, list):
@@ -439,22 +440,31 @@ async def run_agent_loop(
 
     dynamic_system_prompt = SYSTEM_PROMPT + connection_context
 
+    # 1. Initialize or retrieve conversation history
+    if history is None:
+        messages = []
+    else:
+        messages = history
+
+    # 2. Append new user query to the history matching the provider format
     if llm_provider == "openai":
-        messages = [
-            {"role": "system", "content": dynamic_system_prompt},
-            {"role": "user", "content": query}
-        ]
+        # Find and update or insert system message at the beginning
+        system_msg_idx = next((i for i, m in enumerate(messages) if m.get("role") == "system"), -1)
+        if system_msg_idx != -1:
+            messages[system_msg_idx] = {"role": "system", "content": dynamic_system_prompt}
+        else:
+            messages.insert(0, {"role": "system", "content": dynamic_system_prompt})
+        
+        messages.append({"role": "user", "content": query})
     elif llm_provider == "anthropic":
-        messages = [
-            {"role": "user", "content": query}
-        ]
+        messages.append({"role": "user", "content": query})
     else: # gemini
-        messages = [
+        messages.append(
             genai_types.Content(
                 role="user",
                 parts=[genai_types.Part.from_text(text=query)]
             )
-        ]
+        )
 
     # Loop to support multi-turn reasoning and tool calling
     while True:

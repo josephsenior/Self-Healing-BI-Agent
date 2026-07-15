@@ -131,11 +131,19 @@ async def websocket_chat(websocket: WebSocket):
             await websocket.send_json({"type": "tools_discovered", "tools": tool_names, "count": len(tool_names)})
             await websocket.send_json({"type": "status", "status": "mcp_connected"})
 
+            # Maintain conversation history for the entire WebSocket lifecycle
+            conversation_history = []
+
             async def execute_agent(query_text: str, reasoning_effort: str = None):
                 try:
                     await websocket.send_json({"type": "status", "status": "running"})
                     # Run the LLM/Agent tool loop
-                    async for event in run_agent_loop(query_text, session, reasoning_effort=reasoning_effort):
+                    async for event in run_agent_loop(
+                        query_text,
+                        session,
+                        history=conversation_history,
+                        reasoning_effort=reasoning_effort
+                    ):
                         await websocket.send_json(event)
                     await websocket.send_json({"type": "complete"})
                 except asyncio.CancelledError:

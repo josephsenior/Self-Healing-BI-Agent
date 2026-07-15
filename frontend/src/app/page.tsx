@@ -26,7 +26,7 @@ export default function Home() {
 
   const [agentConfig, setAgentConfig] = useState<AgentConfig | null>(null);
   const [reasoningEffort, setReasoningEffort] = useState<string>("medium");
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   // Fetch agent config on mount
   useEffect(() => {
@@ -56,9 +56,26 @@ export default function Home() {
     return false;
   };
 
-  // Auto-scroll messages
+  // Auto-scroll messages only if user was already at bottom or if last message is from user
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    const container = scrollContainerRef.current;
+    if (!container) return;
+
+    // Check if the user is near the bottom (threshold of 120px)
+    const isAtBottom =
+      container.scrollHeight - container.scrollTop - container.clientHeight < 120;
+
+    // Check if the last message is from the user
+    const lastMessageIsUser =
+      messages.length > 0 && messages[messages.length - 1].role === "user";
+
+    // If user is at bottom or just sent a message, auto-scroll down
+    if (isAtBottom || lastMessageIsUser) {
+      container.scrollTo({
+        top: container.scrollHeight,
+        behavior: "smooth",
+      });
+    }
   }, [messages, activeToolCalls]);
 
   const isRunning =
@@ -135,7 +152,7 @@ export default function Home() {
         </div>
 
         {/* Scrollable messages */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-4">
+        <div ref={scrollContainerRef} className="flex-1 overflow-y-auto p-6 space-y-4">
           {messages.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center text-zinc-400 space-y-3">
               <MessageSquare className="w-12 h-12 text-zinc-300" />
@@ -163,8 +180,6 @@ export default function Home() {
               </div>
             </div>
           )}
-
-          <div ref={messagesEndRef} />
         </div>
 
         <ChatInput

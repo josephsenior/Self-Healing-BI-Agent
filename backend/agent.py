@@ -17,8 +17,12 @@ from mcp.client.stdio import stdio_client
 from mcp.client.sse import sse_client
 import mcp.types as types
 
+import httpx
 logger = logging.getLogger("mcp_agent")
 logging.basicConfig(level=logging.INFO)
+
+# Global HTTP client with disabled SSL verification to bypass local/corporate proxy cert issues
+http_client = httpx.AsyncClient(verify=False)
 
 # Resolve the absolute path to the root .env file (one level above backend/agent.py)
 ROOT_DIR = Path(__file__).resolve().parent.parent
@@ -193,6 +197,27 @@ async def mcp_session_scope(coordinator: ElicitationCoordinator) -> AsyncGenerat
         custom_env["PATH"] = node_dir + os.pathsep + custom_env.get("PATH", "")
 
         logger.info(f"Connecting to local Power BI modeling server via STDIO. Executable: {stdio_cmd}")
+        is_npx = "npx" in stdio_cmd.lower()
+        use_fast_startup = is_npx and config.stdio_args and "@microsoft/powerbi-modeling-mcp" in config.stdio_args
+
+        if use_fast_startup:
+            try:
+                logger.info("Attempting fast startup with --no-install...")
+                fast_args = ["--no-install"] + [arg for arg in config.stdio_args if arg != "-y"]
+                server_params = StdioServerParameters(
+                    command=stdio_cmd,
+                    args=fast_args,
+                    env=custom_env
+                )
+                async with stdio_client(server_params) as (read_stream, write_stream):
+                    async with ClientSession(read_stream, write_stream, elicitation_callback=elicitation_cb) as session:
+                        await session.initialize()
+                        logger.info("Fast startup succeeded.")
+                        yield session
+                        return
+            except Exception as e:
+                logger.warning(f"Fast startup failed: {e}. Falling back to standard startup...")
+
         server_params = StdioServerParameters(
             command=stdio_cmd,
             args=config.stdio_args,
@@ -254,12 +279,13 @@ async def run_agent_loop(
     tool_names = [t.name for t in mcp_tools.tools]
     yield {"type": "tools_discovered", "tools": tool_names, "count": len(tool_names)}
 
-    # Initialize LLM Clients
-    openai_client = openai.AsyncOpenAI(api_key=config.openai_api_key)
-    anthropic_client = anthropic.AsyncAnthropic(api_key=config.anthropic_api_key)
+    # Initialize LLM Clients (using global http_client to bypass SSL verification issues)
+    openai_client = openai.AsyncOpenAI(api_key=config.openai_api_key, http_client=http_client)
+    anthropic_client = anthropic.AsyncAnthropic(api_key=config.anthropic_api_key, http_client=http_client)
     gemini_client = openai.AsyncOpenAI(
         api_key=config.gemini_api_key,
-        base_url="https://generativelanguage.googleapis.com/v1beta/openai/"
+        base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+        http_client=http_client
     )
 
     messages = [

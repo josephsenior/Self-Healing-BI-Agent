@@ -44,7 +44,7 @@ export type ConnectionStatus = "connecting" | "connected" | "disconnected" | "er
 export type AgentStatus = "idle" | "starting_agent" | "mcp_connected" | "running" | "complete" | "cancelled" | "error";
 
 export type WSOutgoingMessage =
-  | { type: "query"; text: string }
+  | { type: "query"; text: string; reasoningEffort?: string }
   | { type: "elicitation_response"; id: string; action: "accept" | "decline" | "cancel"; content: Record<string, unknown> }
   | { type: "abort" };
 

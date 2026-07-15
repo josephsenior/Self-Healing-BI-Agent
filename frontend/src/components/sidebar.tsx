@@ -10,6 +10,8 @@ interface SidebarProps {
   discoveredTools: string[];
   onReconnect: () => void;
   onConfigUpdate: (newConfig: AgentConfig) => Promise<boolean>;
+  reasoningEffort: string;
+  onReasoningEffortChange: (val: string) => void;
 }
 
 export function Sidebar({
@@ -18,6 +20,8 @@ export function Sidebar({
   discoveredTools,
   onReconnect,
   onConfigUpdate,
+  reasoningEffort,
+  onReasoningEffortChange,
 }: SidebarProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [provider, setProvider] = useState("");
@@ -286,6 +290,29 @@ export function Sidebar({
           ) : (
             <p className="text-[11px] text-zinc-400 italic">No config loaded</p>
           )}
+        </div>
+
+        {/* Reasoning Effort Switcher */}
+        <div className="bg-white rounded-lg p-3 border border-zinc-200 shadow-sm space-y-2.5">
+          <h2 className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider">
+            Reasoning Effort
+          </h2>
+          <div className="grid grid-cols-4 gap-1 p-0.5 bg-zinc-100/80 rounded-lg border border-zinc-200">
+            {["off", "low", "medium", "high"].map((effort) => (
+              <button
+                key={effort}
+                type="button"
+                onClick={() => onReasoningEffortChange(effort)}
+                className={`py-1 text-[10px] font-medium rounded transition-all capitalize ${
+                  reasoningEffort === effort
+                    ? "bg-white text-zinc-950 shadow-sm border border-zinc-200/50"
+                    : "text-zinc-500 hover:text-zinc-800"
+                }`}
+              >
+                {effort}
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* Discovered Tools */}

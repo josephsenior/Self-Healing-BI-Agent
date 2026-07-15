@@ -131,11 +131,11 @@ async def websocket_chat(websocket: WebSocket):
             await websocket.send_json({"type": "tools_discovered", "tools": tool_names, "count": len(tool_names)})
             await websocket.send_json({"type": "status", "status": "mcp_connected"})
 
-            async def execute_agent(query_text: str):
+            async def execute_agent(query_text: str, reasoning_effort: str = None):
                 try:
                     await websocket.send_json({"type": "status", "status": "running"})
                     # Run the LLM/Agent tool loop
-                    async for event in run_agent_loop(query_text, session):
+                    async for event in run_agent_loop(query_text, session, reasoning_effort=reasoning_effort):
                         await websocket.send_json(event)
                     await websocket.send_json({"type": "complete"})
                 except asyncio.CancelledError:
@@ -159,6 +159,7 @@ async def websocket_chat(websocket: WebSocket):
 
                 if msg_type == "query":
                     query_text = message.get("text")
+                    reasoning_effort = message.get("reasoningEffort")
                     # Cancel existing run if it's currently active
                     if agent_task and not agent_task.done():
                         logger.info("Aborting active agent run to start new query.")
@@ -167,7 +168,7 @@ async def websocket_chat(websocket: WebSocket):
                         await asyncio.sleep(0.1)
 
                     # Spawn new asynchronous agent run task
-                    agent_task = asyncio.create_task(execute_agent(query_text))
+                    agent_task = asyncio.create_task(execute_agent(query_text, reasoning_effort=reasoning_effort))
 
                 elif msg_type == "elicitation_response":
                     elicit_id = message.get("id")

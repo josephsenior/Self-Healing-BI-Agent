@@ -308,7 +308,8 @@ async def run_agent_loop(
     query: str,
     session: ClientSession,
     llm_provider: str = None,
-    llm_model: str = None
+    llm_model: str = None,
+    reasoning_effort: str = None
 ) -> AsyncGenerator[Dict[str, Any], None]:
     """
     Main asynchronous agent execution generator. Streams responses and tool states
@@ -354,6 +355,19 @@ async def run_agent_loop(
             # Reset tool call holders
             gemini_tool_calls = []
 
+            # Determine thinking budget and config based on requested reasoning effort level
+            thinking_budget = 1024
+            if reasoning_effort == "low":
+                thinking_budget = 1024
+            elif reasoning_effort == "medium":
+                thinking_budget = 2048
+            elif reasoning_effort == "high":
+                thinking_budget = 4096
+
+            thinking_config = None
+            if reasoning_effort != "off":
+                thinking_config = genai_types.ThinkingConfig(thinking_budget=thinking_budget)
+
             # We pass SYSTEM_PROMPT in GenerateContentConfig system_instruction
             response_stream = await gemini_client.aio.models.generate_content_stream(
                 model=llm_model,
@@ -361,9 +375,7 @@ async def run_agent_loop(
                 config=genai_types.GenerateContentConfig(
                     system_instruction=SYSTEM_PROMPT,
                     tools=gemini_tools if gemini_tools else None,
-                    thinking_config=genai_types.ThinkingConfig(
-                        thinking_budget=1024
-                    )
+                    thinking_config=thinking_config
                 )
             )
 

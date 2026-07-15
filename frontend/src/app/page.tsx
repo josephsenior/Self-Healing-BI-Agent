@@ -25,6 +25,7 @@ export default function Home() {
   } = useAgent("ws://localhost:8000/ws/chat");
 
   const [agentConfig, setAgentConfig] = useState<AgentConfig | null>(null);
+  const [reasoningEffort, setReasoningEffort] = useState<string>("medium");
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Fetch agent config on mount
@@ -118,6 +119,8 @@ export default function Home() {
         discoveredTools={discoveredTools}
         onReconnect={reconnect}
         onConfigUpdate={handleConfigUpdate}
+        reasoningEffort={reasoningEffort}
+        onReasoningEffortChange={setReasoningEffort}
       />
 
       {/* Main content area */}
@@ -164,9 +167,8 @@ export default function Home() {
           <div ref={messagesEndRef} />
         </div>
 
-        {/* Chat input */}
         <ChatInput
-          onSend={sendQuery}
+          onSend={(text) => sendQuery(text, reasoningEffort)}
           onAbort={abort}
           disabled={inputDisabled}
           isRunning={isRunning}

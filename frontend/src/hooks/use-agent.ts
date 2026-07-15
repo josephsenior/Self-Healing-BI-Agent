@@ -18,7 +18,7 @@ interface UseAgentReturn {
   activeToolCalls: ToolCall[];
   elicitation: ElicitationRequest | null;
   discoveredTools: string[];
-  sendQuery: (text: string) => void;
+  sendQuery: (text: string, reasoningEffort?: string) => void;
   respondToElicitation: (
     id: string,
     action: "accept" | "decline" | "cancel",
@@ -213,7 +213,7 @@ export function useAgent(url: string): UseAgentReturn {
     };
   }, [connect]);
 
-  const sendQuery = useCallback((text: string) => {
+  const sendQuery = useCallback((text: string, reasoningEffort?: string) => {
     if (!socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) return;
 
     // Add user message
@@ -231,7 +231,7 @@ export function useAgent(url: string): UseAgentReturn {
     setActiveToolCalls([]);
 
     // Send over WebSocket
-    const msg: WSOutgoingMessage = { type: "query", text };
+    const msg: WSOutgoingMessage = { type: "query", text, reasoningEffort };
     socketRef.current.send(JSON.stringify(msg));
 
     setAgentStatus("running");

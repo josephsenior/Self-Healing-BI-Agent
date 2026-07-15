@@ -4,6 +4,7 @@ import React, { useState } from "react";
 import type { ChatMessage } from "@/types";
 import { ToolCallCard } from "@/components/tool-call-card";
 import { Brain, ChevronDown, ChevronRight } from "lucide-react";
+import { MarkdownRenderer } from "@/components/markdown-renderer";
 
 interface ChatMessageBubbleProps {
   message: ChatMessage;
@@ -20,6 +21,22 @@ export function ChatMessageBubble({ message }: ChatMessageBubbleProps) {
   });
 
   const [showReasoning, setShowReasoning] = useState(true);
+
+  // Extract thinking/reasoning tags dynamically from streamed message content
+  let displayContent = message.content || "";
+  let reasoningContent = message.reasoningContent || "";
+
+  const thinkingRegex = /<thinking>([\s\S]*?)<\/thinking>/;
+  const match = displayContent.match(thinkingRegex);
+
+  if (match) {
+    reasoningContent = (reasoningContent + "\n" + match[1]).trim();
+    displayContent = displayContent.replace(thinkingRegex, "").trim();
+  } else if (displayContent.includes("<thinking>")) {
+    const parts = displayContent.split("<thinking>");
+    displayContent = parts[0].trim();
+    reasoningContent = (reasoningContent + "\n" + parts[1]).trim();
+  }
 
   return (
     <div
@@ -45,7 +62,7 @@ export function ChatMessageBubble({ message }: ChatMessageBubbleProps) {
         </div>
 
         {/* Streamed reasoning/thinking traces */}
-        {message.reasoningContent && (
+        {reasoningContent && (
           <div className="mb-3 rounded border border-amber-100 bg-amber-50/40 text-xs">
             <button
               onClick={() => setShowReasoning(!showReasoning)}
@@ -61,14 +78,14 @@ export function ChatMessageBubble({ message }: ChatMessageBubbleProps) {
             </button>
             {showReasoning && (
               <div className="px-3 pb-3 pt-1 text-amber-700 whitespace-pre-wrap leading-relaxed border-t border-amber-100/50 font-sans italic">
-                {message.reasoningContent}
+                {reasoningContent}
               </div>
             )}
           </div>
         )}
 
-        {/* Message content */}
-        {message.content && <div className="whitespace-pre-wrap text-zinc-800">{message.content}</div>}
+        {/* Message content formatted as Markdown with syntax highlighting */}
+        {displayContent && <MarkdownRenderer content={displayContent} />}
 
         {/* Tool calls attached to this message */}
         {message.toolCalls && message.toolCalls.length > 0 && (

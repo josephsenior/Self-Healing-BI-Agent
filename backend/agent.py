@@ -393,11 +393,7 @@ async def run_agent_loop(
             async for chunk in response_stream:
                 if chunk.candidates and chunk.candidates[0].content:
                     for part in chunk.candidates[0].content.parts:
-                        # Extract reasoning if stored inside thought/thought_signature
-                        # Note: In google-genai chunk.candidates[0].content.parts, thought parts have a "thought" boolean or text, or we can check the text or raw thought contents
-                        # Let's yield any text reasoning tokens
-                        # Actually, some preview models might put thought trace in text when thought flag is set, or return it directly. We also print it in the debug console.
-                        if part.thought:
+                        if getattr(part, "thought", False):
                             reasoning_accumulator.append(part.text)
                             yield {"type": "reasoning_token", "text": part.text}
                         elif part.text:

@@ -8,23 +8,68 @@ interface MarkdownRendererProps {
 export function MarkdownRenderer({ content }: MarkdownRendererProps) {
   if (!content) return null;
 
-  // Split content by code blocks: ```lang\ncode\n```
-  const parts = content.split(/(```[\s\S]*?```)/g);
+  // Robust streaming markdown parser to extract code blocks (even when incomplete/unclosed)
+  const parts: { type: "text" | "code"; content: string; language?: string }[] = [];
+  let remaining = content;
+
+  while (remaining.length > 0) {
+    const codeStartIdx = remaining.indexOf("```");
+    if (codeStartIdx === -1) {
+      parts.push({ type: "text", content: remaining });
+      break;
+    }
+
+    if (codeStartIdx > 0) {
+      parts.push({ type: "text", content: remaining.slice(0, codeStartIdx) });
+    }
+
+    const afterStart = remaining.slice(codeStartIdx + 3);
+    const nextLineBreak = afterStart.indexOf("\n");
+    let language = "";
+    let codeContent = "";
+
+    if (nextLineBreak !== -1) {
+      language = afterStart.slice(0, nextLineBreak).trim();
+      const codeAndRest = afterStart.slice(nextLineBreak + 1);
+      const nextTripleBacktick = codeAndRest.indexOf("```");
+      if (nextTripleBacktick !== -1) {
+        codeContent = codeAndRest.slice(0, nextTripleBacktick);
+        remaining = codeAndRest.slice(nextTripleBacktick + 3);
+      } else {
+        // Unclosed code block (still streaming!)
+        codeContent = codeAndRest;
+        remaining = "";
+      }
+    } else {
+      // Still typing language name
+      language = afterStart.trim();
+      codeContent = "";
+      remaining = "";
+    }
+
+    parts.push({ type: "code", content: codeContent, language });
+  }
 
   return (
     <div className="space-y-3">
+      {/* Self-contained styling to prevent Tailwind purging dynamic class colors */}
+      <style dangerouslySetInnerHTML={{ __html: `
+        .syntax-keyword { color: #38bdf8 !important; font-weight: 500; text-transform: uppercase; }
+        .syntax-string { color: #34d399 !important; }
+        .syntax-number { color: #fbbf24 !important; }
+        .syntax-comment { color: #71717a !important; font-style: italic; }
+        .syntax-generic-keyword { color: #fb923c !important; font-weight: 500; }
+        .syntax-json-key { color: #38bdf8 !important; font-weight: 500; }
+        .syntax-json-bool { color: #fb923c !important; font-weight: 600; }
+        .syntax-json-null { color: #71717a !important; }
+      `}} />
       {parts.map((part, index) => {
-        if (part.startsWith("```")) {
-          // Extract language and code
-          const match = part.match(/```(\w*)\n([\s\S]*?)```/);
-          const lang = match ? match[1] : "";
-          const code = match ? match[2].trim() : part.slice(3, -3).trim();
-
+        if (part.type === "code") {
           return (
-            <CodeBlock key={index} language={lang} code={code} />
+            <CodeBlock key={index} language={part.language || ""} code={part.content} />
           );
         } else {
-          return <TextPart key={index} text={part} />;
+          return <TextPart key={index} text={part.content} />;
         }
       })}
     </div>
@@ -133,17 +178,17 @@ function highlightCode(code: string, language: string): string {
     return escaped.replace(
       /("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+-]?\d+)?)/g,
       (match) => {
-        let cls = "text-amber-400"; // numbers
+        let cls = "syntax-number"; // numbers
         if (/^"/.test(match)) {
           if (/:$/.test(match)) {
-            cls = "text-sky-400 font-medium"; // JSON key
+            cls = "syntax-json-key"; // JSON key
           } else {
-            cls = "text-emerald-400"; // string values
+            cls = "syntax-string"; // string values
           }
         } else if (/true|false/.test(match)) {
-          cls = "text-orange-400 font-semibold";
+          cls = "syntax-json-bool";
         } else if (/null/.test(match)) {
-          cls = "text-zinc-500";
+          cls = "syntax-json-null";
         }
         return `<span class="${cls}">${match}</span>`;
       }
@@ -162,26 +207,25 @@ function highlightCode(code: string, language: string): string {
     let result = escaped;
 
     // 1. Highlight strings: "..." or '...'
-    result = result.replace(/(".*?"|'.*?')/g, '<span class="text-emerald-400">$1</span>');
+    result = result.replace(/(".*?"|'.*?')/g, '<span class="syntax-string">$1</span>');
 
     // 2. Highlight keywords (case-insensitive boundary match)
     const regex = new RegExp(`\\b(${keywords.join("|")})\\b`, "gi");
     result = result.replace(
       regex,
-      (match) => `<span class="text-sky-400 font-medium uppercase">${match}</span>`
+      (match) => `<span class="syntax-keyword">${match}</span>`
     );
 
     // 3. Highlight comments: -- ... or // ...
     result = result.replace(
       /(--.*?\n|\/\/.*?\n)/g,
-      '<span class="text-zinc-500 italic">$1</span>'
+      '<span class="syntax-comment">$1</span>'
     );
 
     return result;
   }
 
   // Generic highlighting for code blocks (e.g. JS, TS, Python)
-  // Let's highlight strings and basic control keywords
   const genericKeywords = [
     "import", "from", "as", "class", "def", "function", "const", "let", "var",
     "if", "else", "for", "while", "return", "async", "await", "try", "except", "catch"
@@ -189,13 +233,13 @@ function highlightCode(code: string, language: string): string {
   let genericResult = escaped;
 
   // strings
-  genericResult = genericResult.replace(/(".*?"|'.*?'|`.*?`)/g, '<span class="text-emerald-400">$1</span>');
+  genericResult = genericResult.replace(/(".*?"|'.*?'|`.*?`)/g, '<span class="syntax-string">$1</span>');
 
   // keywords
   const regexGen = new RegExp(`\\b(${genericKeywords.join("|")})\\b`, "g");
   genericResult = genericResult.replace(
     regexGen,
-    (match) => `<span class="text-orange-400 font-medium">${match}</span>`
+    (match) => `<span class="syntax-generic-keyword">${match}</span>`
   );
 
   return genericResult;

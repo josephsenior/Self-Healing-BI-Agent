@@ -101,8 +101,8 @@ async def update_config(req: ConfigUpdateRequest):
 @app.websocket("/ws/chat")
 async def websocket_chat(websocket: WebSocket):
     """
-    Bidirectional WebSocket chat endpoint supporting streamed LLM outputs
-    and human-in-the-loop safety approvals.
+    Bidirectional WebSocket chat endpoint supporting streamed LLM outputs,
+    persistent warm MCP session runtime, and human-in-the-loop safety approvals.
     """
     await websocket.accept()
     logger.info("WebSocket connection established.")
@@ -120,68 +120,78 @@ async def websocket_chat(websocket: WebSocket):
 
     agent_task = None
 
-    async def execute_agent(query_text: str):
-        try:
-            await websocket.send_json({"type": "status", "status": "starting_agent"})
-
-            # Establish the MCP connection scope
-            async with mcp_session_scope(coordinator) as session:
-                await websocket.send_json({"type": "status", "status": "mcp_connected"})
-
-                # Run the LLM/Agent tool loop
-                async for event in run_agent_loop(query_text, session):
-                    await websocket.send_json(event)
-
-            await websocket.send_json({"type": "complete"})
-        except asyncio.CancelledError:
-            logger.info("Agent task was cancelled by client.")
-            await websocket.send_json({"type": "status", "status": "cancelled"})
-        except Exception as e:
-            logger.error(f"Error in agent tool loop: {e}")
-            await websocket.send_json({"type": "error", "message": str(e)})
-
     try:
-        while True:
-            # Await raw text message from WebSocket client
-            data = await websocket.receive_text()
-            try:
-                message = json.loads(data)
-            except json.JSONDecodeError:
-                await websocket.send_json({"type": "error", "message": "Invalid JSON payload"})
-                continue
+        await websocket.send_json({"type": "status", "status": "starting_agent"})
 
-            msg_type = message.get("type")
-            logger.info(f"Received message of type: {msg_type}")
+        # Establish and maintain the warm MCP connection scope for the entire socket lifecycle
+        async with mcp_session_scope(coordinator) as session:
+            # Discover tools and notify the client immediately on load
+            mcp_tools = await session.list_tools()
+            tool_names = [t.name for t in mcp_tools.tools]
+            await websocket.send_json({"type": "tools_discovered", "tools": tool_names, "count": len(tool_names)})
+            await websocket.send_json({"type": "status", "status": "mcp_connected"})
 
-            if msg_type == "query":
-                query_text = message.get("text")
-                # Cancel existing run if it's currently active
-                if agent_task and not agent_task.done():
-                    logger.info("Aborting active agent run to start new query.")
-                    agent_task.cancel()
-                    # Short wait to let task clean up
-                    await asyncio.sleep(0.1)
+            async def execute_agent(query_text: str):
+                try:
+                    await websocket.send_json({"type": "status", "status": "running"})
+                    # Run the LLM/Agent tool loop
+                    async for event in run_agent_loop(query_text, session):
+                        await websocket.send_json(event)
+                    await websocket.send_json({"type": "complete"})
+                except asyncio.CancelledError:
+                    logger.info("Agent task was cancelled by client.")
+                    await websocket.send_json({"type": "status", "status": "cancelled"})
+                except Exception as e:
+                    logger.error(f"Error in agent tool loop: {e}")
+                    await websocket.send_json({"type": "error", "message": str(e)})
 
-                # Spawn new asynchronous agent run task
-                agent_task = asyncio.create_task(execute_agent(query_text))
+            while True:
+                # Await raw text message from WebSocket client
+                data = await websocket.receive_text()
+                try:
+                    message = json.loads(data)
+                except json.JSONDecodeError:
+                    await websocket.send_json({"type": "error", "message": "Invalid JSON payload"})
+                    continue
 
-            elif msg_type == "elicitation_response":
-                elicit_id = message.get("id")
-                action = message.get("action")   # 'accept', 'decline', 'cancel'
-                content = message.get("content")  # form payload dictionary or empty dict
+                msg_type = message.get("type")
+                logger.info(f"Received message of type: {msg_type}")
 
-                logger.info(f"Submitting elicitation response. ID: {elicit_id}, Action: {action}")
-                coordinator.submit_response(elicit_id, action, content)
+                if msg_type == "query":
+                    query_text = message.get("text")
+                    # Cancel existing run if it's currently active
+                    if agent_task and not agent_task.done():
+                        logger.info("Aborting active agent run to start new query.")
+                        agent_task.cancel()
+                        # Short wait to let task clean up
+                        await asyncio.sleep(0.1)
 
-            elif msg_type == "abort":
-                if agent_task and not agent_task.done():
-                    logger.info("Client requested execution abort.")
-                    agent_task.cancel()
-                else:
-                    await websocket.send_json({"type": "status", "status": "idle"})
+                    # Spawn new asynchronous agent run task
+                    agent_task = asyncio.create_task(execute_agent(query_text))
+
+                elif msg_type == "elicitation_response":
+                    elicit_id = message.get("id")
+                    action = message.get("action")   # 'accept', 'decline', 'cancel'
+                    content = message.get("content")  # form payload dictionary or empty dict
+
+                    logger.info(f"Submitting elicitation response. ID: {elicit_id}, Action: {action}")
+                    coordinator.submit_response(elicit_id, action, content)
+
+                elif msg_type == "abort":
+                    if agent_task and not agent_task.done():
+                        logger.info("Client requested execution abort.")
+                        agent_task.cancel()
+                    else:
+                        await websocket.send_json({"type": "status", "status": "idle"})
 
     except WebSocketDisconnect:
         logger.info("WebSocket client disconnected.")
+    except Exception as e:
+        logger.error(f"Error in WebSocket lifecycle: {e}")
+        try:
+            await websocket.send_json({"type": "error", "message": str(e)})
+        except Exception:
+            pass
     finally:
         # Guarantee cleanup of running subprocesses or sessions upon socket close
         if agent_task and not agent_task.done():

@@ -377,7 +377,10 @@ async def run_agent_loop(
 
             thinking_config = None
             if reasoning_effort != "off":
-                thinking_config = genai_types.ThinkingConfig(thinking_budget=thinking_budget)
+                thinking_config = genai_types.ThinkingConfig(
+                    include_thoughts=True,
+                    thinking_budget=thinking_budget
+                )
 
             # We pass SYSTEM_PROMPT in GenerateContentConfig system_instruction
             response_stream = await gemini_client.aio.models.generate_content_stream(

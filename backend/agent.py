@@ -346,12 +346,115 @@ async def run_agent_loop(
         )
     )
 
-    messages = [
-        genai_types.Content(
-            role="user",
-            parts=[genai_types.Part.from_text(text=query)]
-        )
-    ]
+    # Dynamic Environment Discovery & Auto-Connection at Startup
+    connection_context = ""
+    if "connection_operations" in tool_names:
+        try:
+            logger.info("Checking active Power BI connections...")
+            import json
+            
+            # 1. Check if there are active connections
+            conn_res = await session.call_tool("connection_operations", {"request": {"operation": "ListConnections"}})
+            conn_data = json.loads(conn_res.content[0].text)
+            connections = conn_data.get("data") if isinstance(conn_data, dict) else conn_data
+            
+            active_conn = None
+            if isinstance(connections, list) and len(connections) > 0:
+                active_conn = connections[0]
+                logger.info(f"Active connection already exists: {active_conn.get('connectionName')}")
+            else:
+                # 2. No active connection, discover local instances and auto-connect
+                logger.info("No active connections. Discovering local instances...")
+                list_res = await session.call_tool("connection_operations", {"request": {"operation": "ListLocalInstances"}})
+                list_data = json.loads(list_res.content[0].text)
+                inst_list = list_data.get("data") if isinstance(list_data, dict) else list_data
+                
+                if isinstance(inst_list, list) and len(inst_list) > 0:
+                    first_inst = inst_list[0]
+                    conn_str = first_inst.get("connectionString")
+                    title = first_inst.get("parentWindowTitle") or "Power BI Desktop"
+                    logger.info(f"Auto-connecting to '{title}'...")
+                    
+                    connect_res = await session.call_tool("connection_operations", {
+                        "request": {
+                            "operation": "Connect",
+                            "connectionString": conn_str
+                        }
+                    })
+                    logger.info(f"Auto-connect response: {connect_res.content[0].text}")
+                    
+                    # Verify active connection again
+                    verify_res = await session.call_tool("connection_operations", {"request": {"operation": "ListConnections"}})
+                    verify_data = json.loads(verify_res.content[0].text)
+                    verify_connections = verify_data.get("data") if isinstance(verify_data, dict) else verify_data
+                    if isinstance(verify_connections, list) and len(verify_connections) > 0:
+                        active_conn = verify_connections[0]
+            
+            if active_conn:
+                conn_name = active_conn.get("connectionName") or "Power BI Model"
+                # 3. Discover tables in the model to inject into System Prompt
+                tables_res = await session.call_tool("table_operations", {"request": {"operation": "GetAllTables"}})
+                tables_data = json.loads(tables_res.content[0].text)
+                tables_list = tables_data.get("data") if isinstance(tables_data, dict) else tables_data
+                
+                table_names = []
+                if isinstance(tables_list, list):
+                    table_names = [t.get("name") for t in tables_list]
+                
+                # Discover measures
+                measures_list = []
+                if "measure_operations" in tool_names:
+                    try:
+                        measures_res = await session.call_tool("measure_operations", {"request": {"operation": "GetAllMeasures"}})
+                        measures_data = json.loads(measures_res.content[0].text)
+                        m_list = measures_data.get("data") if isinstance(measures_data, dict) else measures_data
+                        if isinstance(m_list, list):
+                            measures_list = [f"{m.get('tableName')}[{m.get('name')}]" for m in m_list if m.get('tableName') and m.get('name')]
+                    except Exception as me:
+                        logger.warning(f"Failed to fetch measures: {me}")
+                
+                connection_context = (
+                    f"\n\n[Active Connection Status: CONNECTED]\n"
+                    f"- Connected Instance: '{conn_name}'\n"
+                    f"- Tables in Semantic Model: {', '.join(table_names) if table_names else 'None (Empty Model)'}\n"
+                )
+                if measures_list:
+                    connection_context += f"- Discovered Measures: {', '.join(measures_list[:35])}{' ... (and more)' if len(measures_list) > 35 else ''}\n"
+                
+                connection_context += (
+                    f"Guidance: You are already connected to this semantic model. You do not need to ask the user to connect, "
+                    f"nor do you need to call Connect or ListLocalInstances unless you encounter a disconnection. "
+                    f"Start directly by acknowledging the connection to '{conn_name}' and discussing the model schema or answering the query."
+                )
+            else:
+                connection_context = (
+                    f"\n\n[Active Connection Status: DISCONNECTED]\n"
+                    f"- No local Power BI Desktop instances were detected running.\n"
+                    f"Guidance: Greet the user, explain that you are currently not connected to any model, and guide them to open "
+                    f"Power BI Desktop locally or connect to a Fabric semantic model so we can begin."
+                )
+        except Exception as e:
+            logger.error(f"Error during startup environmental discovery: {e}")
+            connection_context = f"\n\n[Active Connection Status: ERROR]\n- Details: {e}"
+
+    dynamic_system_prompt = SYSTEM_PROMPT + connection_context
+
+    if llm_provider == "openai":
+        messages = [
+            {"role": "system", "content": dynamic_system_prompt},
+            {"role": "user", "content": query}
+        ]
+    elif llm_provider == "anthropic":
+        messages = [
+            {"role": "user", "content": query}
+        ]
+    else: # gemini
+        messages = [
+            genai_types.Content(
+                role="user",
+                parts=[genai_types.Part.from_text(text=query)]
+            )
+        ]
 
     # Loop to support multi-turn reasoning and tool calling
     while True:
@@ -382,12 +485,12 @@ async def run_agent_loop(
                     thinking_budget=thinking_budget
                 )
 
-            # We pass SYSTEM_PROMPT in GenerateContentConfig system_instruction
+            # We pass dynamic_system_prompt in GenerateContentConfig system_instruction
             response_stream = await gemini_client.aio.models.generate_content_stream(
                 model=llm_model,
                 contents=messages,
                 config=genai_types.GenerateContentConfig(
-                    system_instruction=SYSTEM_PROMPT,
+                    system_instruction=dynamic_system_prompt,
                     tools=gemini_tools if gemini_tools else None,
                     thinking_config=thinking_config
                 )
@@ -660,7 +763,7 @@ async def run_agent_loop(
             async with anthropic_client.messages.stream(
                 model=llm_model,
                 max_tokens=4096,
-                system=SYSTEM_PROMPT,
+                system=dynamic_system_prompt,
                 messages=anthropic_messages,
                 tools=anthropic_tools if anthropic_tools else None
             ) as stream:

@@ -29,13 +29,6 @@ function ReasoningStrip({
     }
   }, [text, isStreaming]);
 
-  // Auto-collapse once model starts answering (streaming=false means done)
-  useEffect(() => {
-    if (!isStreaming) {
-      const t = setTimeout(() => setCollapsed(true), 1200);
-      return () => clearTimeout(t);
-    }
-  }, [isStreaming]);
 
   if (!text) return null;
 

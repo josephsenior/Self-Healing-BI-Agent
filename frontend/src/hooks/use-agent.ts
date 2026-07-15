@@ -77,6 +77,28 @@ export function useAgent(url: string): UseAgentReturn {
         });
         break;
 
+      case "reasoning_token":
+        setMessages((prev) => {
+          if (prev.length === 0 || prev[prev.length - 1].role !== "assistant") {
+            return [
+              ...prev,
+              {
+                id: crypto.randomUUID(),
+                role: "assistant",
+                content: "",
+                reasoningContent: payload.text,
+                timestamp: new Date(),
+              },
+            ];
+          }
+          const updated = [...prev];
+          const last = { ...updated[updated.length - 1] };
+          last.reasoningContent = (last.reasoningContent || "") + payload.text;
+          updated[updated.length - 1] = last;
+          return updated;
+        });
+        break;
+
       case "tool_start": {
         const started: ToolCall[] = payload.calls.map((c) => ({
           id: c.id,

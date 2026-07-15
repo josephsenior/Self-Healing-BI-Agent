@@ -278,6 +278,8 @@ async def run_agent_loop(
             tool_calls_accumulator = {}
             text_accumulator = []
 
+            reasoning_accumulator = []
+
             stream = await gemini_client.chat.completions.create(
                 model=llm_model,
                 messages=messages,
@@ -287,6 +289,9 @@ async def run_agent_loop(
 
             async for chunk in stream:
                 delta = chunk.choices[0].delta
+                if hasattr(delta, "reasoning_content") and delta.reasoning_content:
+                    reasoning_accumulator.append(delta.reasoning_content)
+                    yield {"type": "reasoning_token", "text": delta.reasoning_content}
                 if delta.content:
                     text_accumulator.append(delta.content)
                     yield {"type": "token", "text": delta.content}
@@ -339,6 +344,7 @@ async def run_agent_loop(
                 messages.append({
                     "role": "assistant",
                     "content": "".join(text_accumulator) or None,
+                    "reasoning_content": "".join(reasoning_accumulator) or None,
                     "tool_calls": tool_calls_list
                 })
 
@@ -382,6 +388,12 @@ async def run_agent_loop(
                 # Re-loop to feed tool results back to Gemini
                 continue
             else:
+                # Append assistant message with text to context
+                messages.append({
+                    "role": "assistant",
+                    "content": "".join(text_accumulator) or None,
+                    "reasoning_content": "".join(reasoning_accumulator) or None
+                })
                 # Execution complete
                 break
 
@@ -394,6 +406,8 @@ async def run_agent_loop(
             tool_calls_accumulator = {}
             text_accumulator = []
 
+            reasoning_accumulator = []
+
             stream = await openai_client.chat.completions.create(
                 model=llm_model,
                 messages=messages,
@@ -403,6 +417,9 @@ async def run_agent_loop(
 
             async for chunk in stream:
                 delta = chunk.choices[0].delta
+                if hasattr(delta, "reasoning_content") and delta.reasoning_content:
+                    reasoning_accumulator.append(delta.reasoning_content)
+                    yield {"type": "reasoning_token", "text": delta.reasoning_content}
                 if delta.content:
                     text_accumulator.append(delta.content)
                     yield {"type": "token", "text": delta.content}
@@ -449,6 +466,7 @@ async def run_agent_loop(
                 messages.append({
                     "role": "assistant",
                     "content": "".join(text_accumulator) or None,
+                    "reasoning_content": "".join(reasoning_accumulator) or None,
                     "tool_calls": tool_calls_list
                 })
 
@@ -491,6 +509,12 @@ async def run_agent_loop(
                 # Re-loop to feed tool results back to OpenAI
                 continue
             else:
+                # Append assistant message with text to context
+                messages.append({
+                    "role": "assistant",
+                    "content": "".join(text_accumulator) or None,
+                    "reasoning_content": "".join(reasoning_accumulator) or None
+                })
                 # Execution complete
                 break
 

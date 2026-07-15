@@ -1,8 +1,9 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 import type { ChatMessage } from "@/types";
 import { ToolCallCard } from "@/components/tool-call-card";
+import { Brain, ChevronDown, ChevronRight } from "lucide-react";
 
 interface ChatMessageBubbleProps {
   message: ChatMessage;
@@ -17,6 +18,8 @@ export function ChatMessageBubble({ message }: ChatMessageBubbleProps) {
     second: "2-digit",
     hour12: false,
   });
+
+  const [showReasoning, setShowReasoning] = useState(true);
 
   return (
     <div
@@ -41,8 +44,31 @@ export function ChatMessageBubble({ message }: ChatMessageBubbleProps) {
           <span className="text-[10px] text-zinc-400 font-mono ml-4">{formattedTime}</span>
         </div>
 
+        {/* Streamed reasoning/thinking traces */}
+        {message.reasoningContent && (
+          <div className="mb-3 rounded border border-amber-100 bg-amber-50/40 text-xs">
+            <button
+              onClick={() => setShowReasoning(!showReasoning)}
+              className="flex w-full items-center gap-2 px-3 py-2 text-amber-800 hover:bg-amber-50/80 transition-colors font-medium text-left"
+            >
+              <Brain className="w-3.5 h-3.5 text-amber-600" />
+              <span className="flex-1">Thought Process</span>
+              {showReasoning ? (
+                <ChevronDown className="w-3.5 h-3.5 text-amber-500" />
+              ) : (
+                <ChevronRight className="w-3.5 h-3.5 text-amber-500" />
+              )}
+            </button>
+            {showReasoning && (
+              <div className="px-3 pb-3 pt-1 text-amber-700 whitespace-pre-wrap leading-relaxed border-t border-amber-100/50 font-sans italic">
+                {message.reasoningContent}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Message content */}
-        <div className="whitespace-pre-wrap text-zinc-800">{message.content}</div>
+        {message.content && <div className="whitespace-pre-wrap text-zinc-800">{message.content}</div>}
 
         {/* Tool calls attached to this message */}
         {message.toolCalls && message.toolCalls.length > 0 && (

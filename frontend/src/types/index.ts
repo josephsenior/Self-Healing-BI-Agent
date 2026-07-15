@@ -10,6 +10,7 @@ export interface ChatMessage {
   id: string;
   role: "user" | "assistant";
   content: string;
+  reasoningContent?: string;
   toolCalls?: ToolCall[];
   timestamp: Date;
 }
@@ -50,6 +51,7 @@ export type WSOutgoingMessage =
 export type WSIncomingMessage =
   | { type: "status"; status: string }
   | { type: "token"; text: string }
+  | { type: "reasoning_token"; text: string }
   | { type: "tool_start"; calls: { id: string; name: string; arguments: Record<string, unknown> }[] }
   | { type: "tool_result"; id: string; name: string; result?: string; error?: string }
   | { type: "tools_discovered"; tools: string[]; count: number }

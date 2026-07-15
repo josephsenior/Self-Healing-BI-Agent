@@ -12,6 +12,9 @@ from pathlib import Path
 from pydantic_settings import BaseSettings
 from pydantic import Field
 
+from google import genai
+from google.genai import types as genai_types
+
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from mcp.client.sse import sse_client
@@ -246,6 +249,47 @@ def map_mcp_tools_to_openai(mcp_tools: types.ListToolsResult) -> List[Dict[str, 
         })
     return openai_tools
 
+def map_mcp_tools_to_gemini(mcp_tools: types.ListToolsResult) -> List[genai_types.Tool]:
+    """Convert MCP schemas to native Google GenAI Tool structures."""
+    function_declarations = []
+    for tool in mcp_tools.tools:
+        # Convert schema property types if needed or map them
+        props = {}
+        input_schema = tool.inputSchema or {}
+        raw_properties = input_schema.get("properties", {})
+        
+        for k, v in raw_properties.items():
+            t_type = v.get("type", "STRING").upper()
+            if t_type not in ["STRING", "NUMBER", "INTEGER", "BOOLEAN", "ARRAY", "OBJECT", "NULL"]:
+                t_type = "STRING"
+            
+            # Map items if type is ARRAY
+            items_schema = None
+            if t_type == "ARRAY" and "items" in v:
+                items_type = v["items"].get("type", "STRING").upper()
+                if items_type not in ["STRING", "NUMBER", "INTEGER", "BOOLEAN", "ARRAY", "OBJECT", "NULL"]:
+                    items_type = "STRING"
+                items_schema = genai_types.Schema(type=items_type)
+            
+            props[k] = genai_types.Schema(
+                type=t_type,
+                description=v.get("description", ""),
+                items=items_schema
+            )
+            
+        fd = genai_types.FunctionDeclaration(
+            name=tool.name,
+            description=tool.description or "",
+            parameters=genai_types.Schema(
+                type="OBJECT",
+                properties=props,
+                required=input_schema.get("required", [])
+            )
+        )
+        function_declarations.append(fd)
+        
+    return [genai_types.Tool(function_declarations=function_declarations)]
+
 def map_mcp_tools_to_anthropic(mcp_tools: types.ListToolsResult) -> List[Dict[str, Any]]:
     """Convert MCP schemas to Anthropic tool schemas."""
     anthropic_tools = []
@@ -280,109 +324,97 @@ async def run_agent_loop(
     tool_names = [t.name for t in mcp_tools.tools]
     yield {"type": "tools_discovered", "tools": tool_names, "count": len(tool_names)}
 
-    # Initialize LLM Clients (using global http_client to bypass SSL verification issues)
+    # Initialize LLM Clients (using global http_client/http_options to bypass SSL verification issues)
     openai_client = openai.AsyncOpenAI(api_key=config.openai_api_key, http_client=http_client)
     anthropic_client = anthropic.AsyncAnthropic(api_key=config.anthropic_api_key, http_client=http_client)
-    gemini_client = openai.AsyncOpenAI(
+    gemini_client = genai.Client(
         api_key=config.gemini_api_key,
-        base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
-        http_client=http_client
+        http_options=genai_types.HttpOptions(
+            httpx_async_client=http_client
+        )
     )
 
     messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": query}
+        genai_types.Content(
+            role="user",
+            parts=[genai_types.Part.from_text(text=query)]
+        )
     ]
 
     # Loop to support multi-turn reasoning and tool calling
     while True:
         if llm_provider == "gemini":
-            # Map tools
-            openai_tools = map_mcp_tools_to_openai(mcp_tools)
+            # Map tools to Gemini structure
+            gemini_tools = map_mcp_tools_to_gemini(mcp_tools)
 
-            # Call Gemini (Streaming)
-            logger.info("Calling Gemini Chat Completion...")
-            tool_calls_accumulator = {}
+            logger.info("Calling Gemini models.generate_content_stream...")
             text_accumulator = []
-
             reasoning_accumulator = []
+            
+            # Reset tool call holders
+            gemini_tool_calls = []
 
-            stream = await gemini_client.chat.completions.create(
+            # We pass SYSTEM_PROMPT in GenerateContentConfig system_instruction
+            response_stream = await gemini_client.aio.models.generate_content_stream(
                 model=llm_model,
-                messages=messages,
-                tools=openai_tools if openai_tools else None,
-                stream=True
+                contents=messages,
+                config=genai_types.GenerateContentConfig(
+                    system_instruction=SYSTEM_PROMPT,
+                    tools=gemini_tools if gemini_tools else None,
+                    thinking_config=genai_types.ThinkingConfig(
+                        thinking_budget=1024
+                    )
+                )
             )
 
-            async for chunk in stream:
-                delta = chunk.choices[0].delta
-                if hasattr(delta, "reasoning_content") and delta.reasoning_content:
-                    reasoning_accumulator.append(delta.reasoning_content)
-                    yield {"type": "reasoning_token", "text": delta.reasoning_content}
-                if delta.content:
-                    text_accumulator.append(delta.content)
-                    yield {"type": "token", "text": delta.content}
-
-                if delta.tool_calls:
-                    for tc in delta.tool_calls:
-                        index = tc.index
-                        if index not in tool_calls_accumulator:
-                            tool_calls_accumulator[index] = {
-                                "id": tc.id,
-                                "type": tc.type,
-                                "function": {"name": "", "arguments": ""},
-                                "extra_content": None
-                            }
-                        if tc.id:
-                            tool_calls_accumulator[index]["id"] = tc.id
-                        if hasattr(tc, "extra_content") and tc.extra_content:
-                            tool_calls_accumulator[index]["extra_content"] = tc.extra_content
-                        if tc.function:
-                            if tc.function.name:
-                                tool_calls_accumulator[index]["function"]["name"] = tc.function.name
-                            if tc.function.arguments:
-                                tool_calls_accumulator[index]["function"]["arguments"] += tc.function.arguments
+            async for chunk in response_stream:
+                if chunk.candidates and chunk.candidates[0].content:
+                    for part in chunk.candidates[0].content.parts:
+                        # Extract reasoning if stored inside thought/thought_signature
+                        # Note: In google-genai chunk.candidates[0].content.parts, thought parts have a "thought" boolean or text, or we can check the text or raw thought contents
+                        # Let's yield any text reasoning tokens
+                        # Actually, some preview models might put thought trace in text when thought flag is set, or return it directly. We also print it in the debug console.
+                        if part.thought:
+                            reasoning_accumulator.append(part.text)
+                            yield {"type": "reasoning_token", "text": part.text}
+                        elif part.text:
+                            text_accumulator.append(part.text)
+                            yield {"type": "token", "text": part.text}
+                            
+                        if part.function_call:
+                            gemini_tool_calls.append(part)
 
             # Process any tool calls accumulated
-            if tool_calls_accumulator:
-                tool_calls_list = []
+            if gemini_tool_calls:
                 formatted_tool_calls_payload = []
-
-                for idx, tc in sorted(tool_calls_accumulator.items()):
-                    tool_call_dict = {
-                        "id": tc["id"],
-                        "type": "function",
-                        "function": {
-                            "name": tc["function"]["name"],
-                            "arguments": tc["function"]["arguments"]
-                        }
-                    }
-                    if tc.get("extra_content"):
-                        tool_call_dict["extra_content"] = tc["extra_content"]
-                    
-                    tool_calls_list.append(tool_call_dict)
+                for pt in gemini_tool_calls:
+                    fc = pt.function_call
+                    fc_id = getattr(fc, "id", str(uuid.uuid4()))
                     formatted_tool_calls_payload.append({
-                        "id": tc["id"],
-                        "name": tc["function"]["name"],
-                        "arguments": json.loads(tc["function"]["arguments"])
+                        "id": fc_id,
+                        "name": fc.name,
+                        "arguments": fc.args
                     })
 
-                # Append assistant message with tool calls to context
-                messages.append({
-                    "role": "assistant",
-                    "content": "".join(text_accumulator) or None,
-                    "reasoning_content": "".join(reasoning_accumulator) or None,
-                    "tool_calls": tool_calls_list
-                })
+                # Append assistant content containing tool call parts (including thought_signature!)
+                # The GenAI SDK Content object contains the exact parts list returned by the model
+                messages.append(
+                    genai_types.Content(
+                        role="model",
+                        parts=gemini_tool_calls
+                    )
+                )
 
                 # Alert client of tool starts
                 yield {"type": "tool_start", "calls": formatted_tool_calls_payload}
 
                 # Execute tool calls
-                for tc in tool_calls_list:
-                    tool_name = tc["function"]["name"]
-                    tool_args = json.loads(tc["function"]["arguments"])
-                    tc_id = tc["id"]
+                tool_response_parts = []
+                for pt, payload in zip(gemini_tool_calls, formatted_tool_calls_payload):
+                    fc = pt.function_call
+                    tool_name = fc.name
+                    tool_args = fc.args
+                    tc_id = payload["id"]
 
                     try:
                         logger.info(f"Executing tool {tool_name} with args {tool_args}")
@@ -397,30 +429,43 @@ async def run_agent_loop(
                                 content_str += f"[{item.type} content]"
 
                         yield {"type": "tool_result", "id": tc_id, "name": tool_name, "result": content_str}
-                        messages.append({
-                            "role": "tool",
-                            "tool_call_id": tc_id,
-                            "name": tool_name,
-                            "content": content_str
-                        })
+                        tool_response_parts.append(
+                            genai_types.Part.from_function_response(
+                                name=tool_name,
+                                response={"result": content_str}
+                            )
+                        )
                     except Exception as e:
                         logger.error(f"Error executing tool {tool_name}: {e}")
                         yield {"type": "tool_result", "id": tc_id, "name": tool_name, "error": str(e)}
-                        messages.append({
-                            "role": "tool",
-                            "tool_call_id": tc_id,
-                            "name": tool_name,
-                            "content": f"Error executing tool: {str(e)}"
-                        })
+                        tool_response_parts.append(
+                            genai_types.Part.from_function_response(
+                                name=tool_name,
+                                response={"error": str(e)}
+                            )
+                        )
+                
+                # Append tool responses to context
+                messages.append(
+                    genai_types.Content(
+                        role="user",
+                        parts=tool_response_parts
+                    )
+                )
                 # Re-loop to feed tool results back to Gemini
                 continue
             else:
-                # Append assistant message with text to context
-                messages.append({
-                    "role": "assistant",
-                    "content": "".join(text_accumulator) or None,
-                    "reasoning_content": "".join(reasoning_accumulator) or None
-                })
+                # Append assistant final message
+                final_parts = []
+                if text_accumulator:
+                    final_parts.append(genai_types.Part.from_text(text="".join(text_accumulator)))
+                
+                messages.append(
+                    genai_types.Content(
+                        role="model",
+                        parts=final_parts
+                    )
+                )
                 # Execution complete
                 break
 

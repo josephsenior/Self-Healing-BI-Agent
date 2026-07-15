@@ -1,16 +1,115 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import type { ChatMessage } from "@/types";
 import { ToolCallCard } from "@/components/tool-call-card";
-import { Brain, ChevronDown, ChevronRight } from "lucide-react";
 import { MarkdownRenderer } from "@/components/markdown-renderer";
 
 interface ChatMessageBubbleProps {
   message: ChatMessage;
+  isStreaming?: boolean; // true while this is the last message and agent is running
 }
 
-export function ChatMessageBubble({ message }: ChatMessageBubbleProps) {
+// ─── Minimal Streaming Reasoning Strip ───────────────────────────────────────
+
+function ReasoningStrip({
+  text,
+  isStreaming,
+}: {
+  text: string;
+  isStreaming: boolean;
+}) {
+  const [collapsed, setCollapsed] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll the reasoning strip while streaming
+  useEffect(() => {
+    if (isStreaming && scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [text, isStreaming]);
+
+  // Auto-collapse once model starts answering (streaming=false means done)
+  useEffect(() => {
+    if (!isStreaming) {
+      const t = setTimeout(() => setCollapsed(true), 1200);
+      return () => clearTimeout(t);
+    }
+  }, [isStreaming]);
+
+  if (!text) return null;
+
+  return (
+    <div className="mb-3 select-none">
+      <button
+        onClick={() => setCollapsed((c) => !c)}
+        className="flex items-center gap-2 w-full text-left group"
+        aria-label="Toggle reasoning"
+      >
+        {/* Animated brain dot */}
+        <span className="relative flex-shrink-0 flex items-center justify-center w-4 h-4">
+          <span
+            className={`absolute inline-block w-2 h-2 rounded-full ${
+              isStreaming
+                ? "bg-violet-400 animate-ping opacity-75"
+                : "bg-violet-300"
+            }`}
+          />
+          <span className="relative inline-block w-1.5 h-1.5 rounded-full bg-violet-500" />
+        </span>
+
+        {/* Label */}
+        <span className="text-[10px] font-semibold text-violet-500 uppercase tracking-widest">
+          {isStreaming ? "Thinking…" : "Reasoning"}
+        </span>
+
+        {/* Word count */}
+        <span className="text-[9px] text-zinc-300 font-mono ml-auto">
+          {text.split(/\s+/).filter(Boolean).length}w
+        </span>
+
+        {/* Collapse chevron */}
+        <svg
+          className={`w-3 h-3 text-zinc-400 transition-transform duration-200 ${
+            collapsed ? "-rotate-90" : ""
+          }`}
+          viewBox="0 0 16 16"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+        >
+          <path d="M4 6l4 4 4-4" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+
+      {/* Body — visible when not collapsed */}
+      <div
+        className={`overflow-hidden transition-all duration-300 ease-out ${
+          collapsed ? "max-h-0 opacity-0" : "max-h-60 opacity-100"
+        }`}
+      >
+        <div
+          ref={scrollRef}
+          className="mt-1.5 max-h-52 overflow-y-auto scroll-smooth"
+        >
+          <p className="text-[11px] text-zinc-400 leading-relaxed font-sans italic pl-6 border-l border-violet-200/40">
+            {text}
+            {isStreaming && (
+              <span className="inline-block w-0.5 h-3 bg-violet-400 ml-0.5 animate-pulse align-middle" />
+            )}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Main bubble ─────────────────────────────────────────────────────────────
+
+export function ChatMessageBubble({
+  message,
+  isStreaming = false,
+}: ChatMessageBubbleProps) {
   const isUser = message.role === "user";
 
   const formattedTime = new Date(message.timestamp).toLocaleTimeString("en-US", {
@@ -20,76 +119,53 @@ export function ChatMessageBubble({ message }: ChatMessageBubbleProps) {
     hour12: false,
   });
 
-  const [showReasoning, setShowReasoning] = useState(true);
+  // Strip any leftover <thinking>…</thinking> tags from display content
+  const displayContent = (message.content || "")
+    .replace(/<thinking>[\s\S]*?<\/thinking>/g, "")
+    .trim();
 
-  // Extract thinking/reasoning tags dynamically from streamed message content
-  let displayContent = message.content || "";
-  let reasoningContent = message.reasoningContent || "";
-
-  const thinkingRegex = /<thinking>([\s\S]*?)<\/thinking>/;
-  const match = displayContent.match(thinkingRegex);
-
-  if (match) {
-    reasoningContent = (reasoningContent + "\n" + match[1]).trim();
-    displayContent = displayContent.replace(thinkingRegex, "").trim();
-  } else if (displayContent.includes("<thinking>")) {
-    const parts = displayContent.split("<thinking>");
-    displayContent = parts[0].trim();
-    reasoningContent = (reasoningContent + "\n" + parts[1]).trim();
-  }
+  const reasoningText = message.reasoningContent || "";
+  // Reasoning is actively streaming when there's reasoning text, no display content yet,
+  // and the agent is currently running
+  const reasoningStreaming = isStreaming && !!reasoningText && !displayContent;
 
   return (
-    <div
-      className={`flex w-full animate-fade-in ${isUser ? "justify-end" : "justify-start"}`}
-    >
+    <div className={`flex w-full animate-fade-in ${isUser ? "justify-end" : "justify-start"}`}>
       <div
-        className={`max-w-[75%] rounded-lg p-4 border text-sm leading-relaxed ${
+        className={`max-w-[78%] rounded-xl px-4 py-3 text-sm leading-relaxed border ${
           isUser
-            ? "bg-zinc-50 border border-zinc-200 text-zinc-900"
-            : "bg-white border border-zinc-200 text-zinc-900 shadow-sm"
+            ? "bg-zinc-50 border-zinc-200 text-zinc-900"
+            : "bg-white border-zinc-200 text-zinc-900 shadow-sm"
         }`}
       >
-        {/* Header: role + timestamp */}
-        <div className="flex items-center justify-between mb-2">
+        {/* Header */}
+        <div className="flex items-center justify-between mb-2.5">
           <span
-            className={`text-[11px] font-semibold uppercase tracking-wider ${
-              isUser ? "text-orange-600" : "text-zinc-900"
+            className={`text-[10px] font-bold uppercase tracking-widest ${
+              isUser ? "text-orange-500" : "text-zinc-400"
             }`}
           >
             {isUser ? "You" : "Agent"}
           </span>
-          <span className="text-[10px] text-zinc-400 font-mono ml-4">{formattedTime}</span>
+          <span className="text-[10px] text-zinc-300 font-mono">{formattedTime}</span>
         </div>
 
-        {/* Streamed reasoning/thinking traces */}
-        {reasoningContent && (
-          <div className="mb-3 rounded border border-amber-100 bg-amber-50/40 text-xs">
-            <button
-              onClick={() => setShowReasoning(!showReasoning)}
-              className="flex w-full items-center gap-2 px-3 py-2 text-amber-800 hover:bg-amber-50/80 transition-colors font-medium text-left"
-            >
-              <Brain className="w-3.5 h-3.5 text-amber-600" />
-              <span className="flex-1">Thought Process</span>
-              {showReasoning ? (
-                <ChevronDown className="w-3.5 h-3.5 text-amber-500" />
-              ) : (
-                <ChevronRight className="w-3.5 h-3.5 text-amber-500" />
-              )}
-            </button>
-            {showReasoning && (
-              <div className="px-3 pb-3 pt-1 text-amber-700 whitespace-pre-wrap leading-relaxed border-t border-amber-100/50 font-sans italic">
-                {reasoningContent}
-              </div>
-            )}
-          </div>
+        {/* Reasoning strip — shown for assistant only */}
+        {!isUser && reasoningText && (
+          <ReasoningStrip text={reasoningText} isStreaming={reasoningStreaming} />
         )}
 
-        {/* Message content formatted as Markdown with syntax highlighting */}
+        {/* Main content */}
         {displayContent && <MarkdownRenderer content={displayContent} />}
 
-        {/* Tool calls attached to this message */}
+        {/* Typing cursor when streaming response text */}
+        {isStreaming && displayContent && (
+          <span className="inline-block w-0.5 h-3.5 bg-zinc-400 ml-0.5 animate-pulse align-middle" />
+        )}
+
+        {/* Tool calls */}
         {message.toolCalls && message.toolCalls.length > 0 && (
-          <div className="mt-3 pt-3 border-t border-zinc-200 space-y-2">
+          <div className="mt-3 pt-3 border-t border-zinc-100 space-y-2">
             {message.toolCalls.map((tc) => (
               <ToolCallCard key={tc.id} toolCall={tc} />
             ))}

@@ -1,109 +1,119 @@
 import React, { useState } from "react";
+import { Highlight, themes } from "prism-react-renderer";
 import { Check, Copy } from "lucide-react";
 
 interface MarkdownRendererProps {
   content: string;
 }
 
-export function MarkdownRenderer({ content }: MarkdownRendererProps) {
-  if (!content) return null;
+// ─── Streaming-safe markdown parser ──────────────────────────────────────────
+// Splits content into text and fenced code block segments, tolerating
+// unclosed/mid-stream blocks so the UI updates in real time.
 
-  // Robust streaming markdown parser to extract code blocks (even when incomplete/unclosed)
-  const parts: { type: "text" | "code"; content: string; language?: string }[] = [];
-  let remaining = content;
+type Part =
+  | { type: "text"; content: string }
+  | { type: "code"; language: string; content: string };
+
+function parseMarkdown(raw: string): Part[] {
+  const parts: Part[] = [];
+  let remaining = raw;
 
   while (remaining.length > 0) {
-    const codeStartIdx = remaining.indexOf("```");
-    if (codeStartIdx === -1) {
+    const start = remaining.indexOf("```");
+    if (start === -1) {
       parts.push({ type: "text", content: remaining });
       break;
     }
 
-    if (codeStartIdx > 0) {
-      parts.push({ type: "text", content: remaining.slice(0, codeStartIdx) });
+    // Text before the fence
+    if (start > 0) {
+      parts.push({ type: "text", content: remaining.slice(0, start) });
     }
 
-    const afterStart = remaining.slice(codeStartIdx + 3);
-    const nextLineBreak = afterStart.indexOf("\n");
-    let language = "";
-    let codeContent = "";
+    const afterFence = remaining.slice(start + 3);
+    const nlIdx = afterFence.indexOf("\n");
 
-    if (nextLineBreak !== -1) {
-      language = afterStart.slice(0, nextLineBreak).trim();
-      const codeAndRest = afterStart.slice(nextLineBreak + 1);
-      const nextTripleBacktick = codeAndRest.indexOf("```");
-      if (nextTripleBacktick !== -1) {
-        codeContent = codeAndRest.slice(0, nextTripleBacktick);
-        remaining = codeAndRest.slice(nextTripleBacktick + 3);
-      } else {
-        // Unclosed code block (still streaming!)
-        codeContent = codeAndRest;
-        remaining = "";
-      }
-    } else {
-      // Still typing language name
-      language = afterStart.trim();
-      codeContent = "";
+    if (nlIdx === -1) {
+      // Still typing the language tag on same line — treat rest as code
+      parts.push({ type: "code", language: afterFence.trim(), content: "" });
+      break;
+    }
+
+    const language = afterFence.slice(0, nlIdx).trim();
+    const body = afterFence.slice(nlIdx + 1);
+    const closingIdx = body.indexOf("```");
+
+    if (closingIdx === -1) {
+      // Unclosed block — still streaming
+      parts.push({ type: "code", language, content: body });
       remaining = "";
+    } else {
+      parts.push({ type: "code", language, content: body.slice(0, closingIdx) });
+      remaining = body.slice(closingIdx + 3);
     }
-
-    parts.push({ type: "code", content: codeContent, language });
   }
 
-  return (
-    <div className="space-y-3">
-      {/* Self-contained styling to prevent Tailwind purging dynamic class colors */}
-      <style dangerouslySetInnerHTML={{ __html: `
-        .syntax-keyword { color: #38bdf8 !important; font-weight: 500; text-transform: uppercase; }
-        .syntax-string { color: #34d399 !important; }
-        .syntax-number { color: #fbbf24 !important; }
-        .syntax-comment { color: #71717a !important; font-style: italic; }
-        .syntax-generic-keyword { color: #fb923c !important; font-weight: 500; }
-        .syntax-json-key { color: #38bdf8 !important; font-weight: 500; }
-        .syntax-json-bool { color: #fb923c !important; font-weight: 600; }
-        .syntax-json-null { color: #71717a !important; }
-      `}} />
-      {parts.map((part, index) => {
-        if (part.type === "code") {
-          return (
-            <CodeBlock key={index} language={part.language || ""} code={part.content} />
-          );
-        } else {
-          return <TextPart key={index} text={part.content} />;
-        }
-      })}
-    </div>
-  );
+  return parts;
 }
+
+// ─── Language alias normalizer for Prism ─────────────────────────────────────
+
+function normalizeLang(lang: string): string {
+  const map: Record<string, string> = {
+    js: "javascript",
+    ts: "typescript",
+    tsx: "tsx",
+    jsx: "jsx",
+    py: "python",
+    sh: "bash",
+    shell: "bash",
+    zsh: "bash",
+    yml: "yaml",
+    dax: "sql",       // closest prism grammar
+    sqlserver: "sql",
+    md: "markdown",
+  };
+  return map[lang.toLowerCase()] ?? lang.toLowerCase();
+}
+
+// ─── Code Block ───────────────────────────────────────────────────────────────
 
 function CodeBlock({ language, code }: { language: string; code: string }) {
   const [copied, setCopied] = useState(false);
+  const lang = normalizeLang(language);
+  const displayLang = language || "code";
 
   const handleCopy = async () => {
     try {
       await navigator.clipboard.writeText(code);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    } catch (err) {
-      console.error("Failed to copy code: ", err);
+    } catch {
+      // clipboard unavailable
     }
   };
 
-  const highlightedHtml = highlightCode(code, language);
-
   return (
-    <div className="my-3 rounded-lg overflow-hidden border border-zinc-200 bg-zinc-950 text-zinc-100 shadow-sm font-mono text-xs">
-      {/* Code Header */}
-      <div className="flex items-center justify-between px-4 py-1.5 bg-zinc-900 border-b border-zinc-800 text-[10px] text-zinc-400 font-sans uppercase tracking-wider">
-        <span>{language || "code"}</span>
+    <div className="my-3 rounded-xl overflow-hidden border border-zinc-800 bg-[#0d1117] shadow-md text-xs font-mono">
+      {/* Header bar */}
+      <div className="flex items-center justify-between px-4 py-2 bg-[#161b22] border-b border-zinc-800">
+        <div className="flex items-center gap-2">
+          {/* Traffic-light dots */}
+          <span className="w-2.5 h-2.5 rounded-full bg-zinc-600" />
+          <span className="w-2.5 h-2.5 rounded-full bg-zinc-600" />
+          <span className="w-2.5 h-2.5 rounded-full bg-zinc-600" />
+          <span className="ml-2 text-[10px] text-zinc-500 uppercase tracking-widest font-sans">
+            {displayLang}
+          </span>
+        </div>
         <button
           onClick={handleCopy}
-          className="flex items-center gap-1 hover:text-zinc-200 transition-colors py-0.5 px-1.5 rounded hover:bg-zinc-800"
+          className="flex items-center gap-1.5 text-zinc-500 hover:text-zinc-200 transition-colors text-[10px] font-sans py-0.5 px-2 rounded hover:bg-zinc-700/50"
         >
           {copied ? (
             <>
-              <Check className="w-3 h-3 text-green-500" />
-              <span className="text-green-500">Copied!</span>
+              <Check className="w-3 h-3 text-green-400" />
+              <span className="text-green-400">Copied</span>
             </>
           ) : (
             <>
@@ -113,134 +123,201 @@ function CodeBlock({ language, code }: { language: string; code: string }) {
           )}
         </button>
       </div>
-      {/* Code Area */}
-      <pre className="p-4 overflow-x-auto whitespace-pre leading-relaxed">
-        <code dangerouslySetInnerHTML={{ __html: highlightedHtml }} />
-      </pre>
+
+      {/* Highlighted code via prism-react-renderer */}
+      <Highlight
+        theme={themes.oneDark}
+        code={code.trimEnd()}
+        language={lang as any}
+      >
+        {({ className, style, tokens, getLineProps, getTokenProps }) => (
+          <pre
+            className={`${className} p-4 overflow-x-auto leading-relaxed text-[12px]`}
+            style={{ ...style, background: "transparent", margin: 0 }}
+          >
+            {tokens.map((line, lineIdx) => (
+              <div key={lineIdx} {...getLineProps({ line })}>
+                {/* Line number */}
+                <span className="select-none mr-4 text-zinc-600 text-[10px] inline-block w-5 text-right">
+                  {lineIdx + 1}
+                </span>
+                {line.map((token, tokenIdx) => (
+                  <span key={tokenIdx} {...getTokenProps({ token })} />
+                ))}
+              </div>
+            ))}
+          </pre>
+        )}
+      </Highlight>
     </div>
   );
 }
 
-function TextPart({ text }: { text: string }) {
-  if (!text) return null;
+// ─── Text renderer — handles bold, italic, inline code, headings ──────────────
 
-  // Split by inline code: `code`
-  const parts = text.split(/(`[^`]+`)/g);
-
-  return (
-    <p className="whitespace-pre-wrap text-zinc-800 leading-relaxed font-sans text-sm">
-      {parts.map((part, index) => {
-        if (part.startsWith("`") && part.endsWith("`")) {
+function renderInline(text: string): React.ReactNode {
+  // Split on inline code first
+  const segments = text.split(/(`[^`\n]+`)/g);
+  return segments.map((seg, i) => {
+    if (seg.startsWith("`") && seg.endsWith("`")) {
+      return (
+        <code
+          key={i}
+          className="px-1.5 py-0.5 mx-0.5 rounded bg-zinc-100 border border-zinc-200 text-orange-600 font-mono text-[11px]"
+        >
+          {seg.slice(1, -1)}
+        </code>
+      );
+    }
+    // Bold **text**
+    const boldSplit = seg.split(/(\*\*[^*]+\*\*)/g);
+    return (
+      <React.Fragment key={i}>
+        {boldSplit.map((b, bi) => {
+          if (b.startsWith("**") && b.endsWith("**")) {
+            return (
+              <strong key={bi} className="font-semibold text-zinc-900">
+                {b.slice(2, -2)}
+              </strong>
+            );
+          }
+          // Italic *text*
+          const italicSplit = b.split(/(\*[^*]+\*)/g);
           return (
-            <code
-              key={index}
-              className="px-1.5 py-0.5 mx-0.5 rounded bg-zinc-100 border border-zinc-200 text-orange-600 font-mono text-xs"
-            >
-              {part.slice(1, -1)}
-            </code>
+            <React.Fragment key={bi}>
+              {italicSplit.map((it, ii) =>
+                it.startsWith("*") && it.endsWith("*") ? (
+                  <em key={ii} className="italic text-zinc-600">
+                    {it.slice(1, -1)}
+                  </em>
+                ) : (
+                  it
+                )
+              )}
+            </React.Fragment>
           );
-        }
-
-        // Handle bold: **text**
-        const boldParts = part.split(/(\*\*[^*]+\*\*)/g);
-        return (
-          <span key={index}>
-            {boldParts.map((bp, bpIdx) => {
-              if (bp.startsWith("**") && bp.endsWith("**")) {
-                return (
-                  <strong key={bpIdx} className="font-semibold text-zinc-950">
-                    {bp.slice(2, -2)}
-                  </strong>
-                );
-              }
-              return bp;
-            })}
-          </span>
-        );
-      })}
-    </p>
-  );
+        })}
+      </React.Fragment>
+    );
+  });
 }
 
-function highlightCode(code: string, language: string): string {
-  const lang = language.toLowerCase();
+function TextPart({ text }: { text: string }) {
+  if (!text.trim()) return null;
 
-  const escapeHtml = (str: string) =>
-    str
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;");
+  const lines = text.split("\n");
+  const elements: React.ReactNode[] = [];
+  let ulItems: string[] = [];
+  let olItems: { n: number; text: string }[] = [];
 
-  const escaped = escapeHtml(code);
-
-  if (lang === "json") {
-    // Basic JSON syntax highlighting
-    return escaped.replace(
-      /("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+-]?\d+)?)/g,
-      (match) => {
-        let cls = "syntax-number"; // numbers
-        if (/^"/.test(match)) {
-          if (/:$/.test(match)) {
-            cls = "syntax-json-key"; // JSON key
-          } else {
-            cls = "syntax-string"; // string values
-          }
-        } else if (/true|false/.test(match)) {
-          cls = "syntax-json-bool";
-        } else if (/null/.test(match)) {
-          cls = "syntax-json-null";
-        }
-        return `<span class="${cls}">${match}</span>`;
-      }
+  const flushUl = (key: string) => {
+    if (!ulItems.length) return;
+    elements.push(
+      <ul key={key} className="my-1.5 pl-5 space-y-0.5 list-disc text-zinc-700 text-sm">
+        {ulItems.map((li, i) => (
+          <li key={i}>{renderInline(li)}</li>
+        ))}
+      </ul>
     );
-  }
+    ulItems = [];
+  };
 
-  if (lang === "dax" || lang === "sql" || lang === "sqlserver") {
-    // Keywords for DAX & SQL
-    const keywords = [
-      "EVALUATE", "DEFINE", "MEASURE", "VAR", "RETURN", "CALCULATE", "FILTER", "ALL",
-      "SELECT", "FROM", "WHERE", "AND", "OR", "NOT", "IN", "SUM", "AVERAGE", "COUNT",
-      "MIN", "MAX", "CALCULATETABLE", "ADDCOLUMNS", "SUMMARIZE", "ROW", "VALUES",
-      "KEEPFILTERS", "USERELATIONSHIP", "CROSSFILTER", "RELATED", "RELATEDTABLE"
-    ];
-
-    let result = escaped;
-
-    // 1. Highlight strings: "..." or '...'
-    result = result.replace(/(".*?"|'.*?')/g, '<span class="syntax-string">$1</span>');
-
-    // 2. Highlight keywords (case-insensitive boundary match)
-    const regex = new RegExp(`\\b(${keywords.join("|")})\\b`, "gi");
-    result = result.replace(
-      regex,
-      (match) => `<span class="syntax-keyword">${match}</span>`
+  const flushOl = (key: string) => {
+    if (!olItems.length) return;
+    elements.push(
+      <ol key={key} className="my-1.5 pl-5 space-y-0.5 list-decimal text-zinc-700 text-sm">
+        {olItems.map((li, i) => (
+          <li key={i}>{renderInline(li.text)}</li>
+        ))}
+      </ol>
     );
+    olItems = [];
+  };
 
-    // 3. Highlight comments: -- ... or // ...
-    result = result.replace(
-      /(--.*?\n|\/\/.*?\n)/g,
-      '<span class="syntax-comment">$1</span>'
-    );
+  lines.forEach((line, idx) => {
+    const key = `line-${idx}`;
 
-    return result;
-  }
+    // Headings
+    const h3 = line.match(/^###\s+(.*)/);
+    const h2 = line.match(/^##\s+(.*)/);
+    const h1 = line.match(/^#\s+(.*)/);
 
-  // Generic highlighting for code blocks (e.g. JS, TS, Python)
-  const genericKeywords = [
-    "import", "from", "as", "class", "def", "function", "const", "let", "var",
-    "if", "else", "for", "while", "return", "async", "await", "try", "except", "catch"
-  ];
-  let genericResult = escaped;
+    if (h1 || h2 || h3) {
+      flushUl(key + "ul");
+      flushOl(key + "ol");
+      const txt = (h1 || h2 || h3)![1];
+      const cls = h1
+        ? "text-base font-bold text-zinc-900 mt-3 mb-1"
+        : h2
+        ? "text-sm font-bold text-zinc-900 mt-2.5 mb-1"
+        : "text-sm font-semibold text-zinc-800 mt-2 mb-0.5";
+      elements.push(
+        <p key={key} className={cls}>
+          {renderInline(txt)}
+        </p>
+      );
+      return;
+    }
 
-  // strings
-  genericResult = genericResult.replace(/(".*?"|'.*?'|`.*?`)/g, '<span class="syntax-string">$1</span>');
+    // Unordered list
+    const ulMatch = line.match(/^[-*+]\s+(.*)/);
+    if (ulMatch) {
+      flushOl(key + "ol");
+      ulItems.push(ulMatch[1]);
+      return;
+    }
 
-  // keywords
-  const regexGen = new RegExp(`\\b(${genericKeywords.join("|")})\\b`, "g");
-  genericResult = genericResult.replace(
-    regexGen,
-    (match) => `<span class="syntax-generic-keyword">${match}</span>`
+    // Ordered list
+    const olMatch = line.match(/^(\d+)\.\s+(.*)/);
+    if (olMatch) {
+      flushUl(key + "ul");
+      olItems.push({ n: parseInt(olMatch[1]), text: olMatch[2] });
+      return;
+    }
+
+    // Horizontal rule
+    if (/^---+$/.test(line.trim())) {
+      flushUl(key + "ul");
+      flushOl(key + "ol");
+      elements.push(<hr key={key} className="border-zinc-200 my-2" />);
+      return;
+    }
+
+    // Normal line
+    flushUl(key + "ul");
+    flushOl(key + "ol");
+    if (line.trim() === "") {
+      elements.push(<div key={key} className="h-1.5" />);
+    } else {
+      elements.push(
+        <p key={key} className="text-zinc-800 text-sm leading-relaxed">
+          {renderInline(line)}
+        </p>
+      );
+    }
+  });
+
+  flushUl("end-ul");
+  flushOl("end-ol");
+
+  return <div className="space-y-0.5">{elements}</div>;
+}
+
+// ─── Public API ───────────────────────────────────────────────────────────────
+
+export function MarkdownRenderer({ content }: MarkdownRendererProps) {
+  if (!content) return null;
+  const parts = parseMarkdown(content);
+
+  return (
+    <div className="space-y-1">
+      {parts.map((part, i) =>
+        part.type === "code" ? (
+          <CodeBlock key={i} language={part.language} code={part.content} />
+        ) : (
+          <TextPart key={i} text={part.content} />
+        )
+      )}
+    </div>
   );
-
-  return genericResult;
 }

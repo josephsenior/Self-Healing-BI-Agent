@@ -162,8 +162,16 @@ export default function Home() {
               </p>
             </div>
           ) : (
-            messages.map((msg) => (
-              <ChatMessageBubble key={msg.id} message={msg} />
+            messages.map((msg, idx) => (
+              <ChatMessageBubble
+                key={msg.id}
+                message={msg}
+                isStreaming={
+                  agentStatus === "running" &&
+                  idx === messages.length - 1 &&
+                  msg.role === "assistant"
+                }
+              />
             ))
           )}
 

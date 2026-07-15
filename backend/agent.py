@@ -38,7 +38,7 @@ class AgentConfig(BaseSettings):
     stdio_command: str = Field(default="npx", alias="POWERBI_STDIO_COMMAND")
     stdio_args: list[str] = ["-y", "@microsoft/powerbi-modeling-mcp", "--start"]
     llm_provider: str = Field(default="gemini", alias="LLM_PROVIDER")
-    llm_model: str = Field(default="gemini-2.5-flash", alias="LLM_MODEL")
+    llm_model: str = Field(default="gemini-3.5-flash", alias="LLM_MODEL")
     openai_api_key: str = Field(default="", alias="OPENAI_API_KEY")
     anthropic_api_key: str = Field(default="", alias="ANTHROPIC_API_KEY")
     gemini_api_key: str = Field(default="", alias="GEMINI_API_KEY")

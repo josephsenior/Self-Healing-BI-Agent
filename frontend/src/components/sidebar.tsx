@@ -76,7 +76,7 @@ export function Sidebar({
   const selectProviderModelDefault = (selectedProvider: string) => {
     setProvider(selectedProvider);
     if (selectedProvider === "gemini") {
-      setModel("gemini-2.5-flash");
+      setModel("gemini-3.5-flash");
     } else if (selectedProvider === "openai") {
       setModel("gpt-4o");
     } else if (selectedProvider === "anthropic") {

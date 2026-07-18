@@ -1,8 +1,10 @@
 import json
 import logging
 import asyncio
+import os
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 
@@ -17,6 +19,12 @@ logger = logging.getLogger("mcp_server")
 logging.basicConfig(level=logging.INFO)
 
 app = FastAPI(title="Power BI MCP Agent Backend")
+
+# Ensure the static files directory exists and mount it
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+static_dir = os.path.join(ROOT_DIR, "static")
+os.makedirs(static_dir, exist_ok=True)
+app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
 # Enable CORS for the frontend dev server
 app.add_middleware(

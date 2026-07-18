@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Highlight, themes } from "prism-react-renderer";
 import { Check, Copy } from "lucide-react";
 
@@ -303,6 +303,69 @@ function TextPart({ text }: { text: string }) {
   return <div className="space-y-0.5">{elements}</div>;
 }
 
+// ─── Mermaid Render Block ──────────────────────────────────────────────────────
+
+function MermaidBlock({ code }: { code: string }) {
+  const [svg, setSvg] = useState<string>("");
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let isMounted = true;
+    const renderDiagram = async () => {
+      try {
+        const { default: mermaid } = await import("mermaid");
+        mermaid.initialize({
+          startOnLoad: false,
+          theme: "dark",
+          securityLevel: "loose",
+        });
+        
+        const id = `mermaid-${Math.floor(Math.random() * 100000)}`;
+        const { svg: renderedSvg } = await mermaid.render(id, code);
+        if (isMounted) {
+          setSvg(renderedSvg);
+          setError(null);
+        }
+      } catch (err: any) {
+        console.error("Mermaid parsing error:", err);
+        if (isMounted) {
+          setError(err.message || "Failed to parse Mermaid diagram");
+        }
+      }
+    };
+
+    renderDiagram();
+    return () => {
+      isMounted = false;
+    };
+  }, [code]);
+
+  if (error) {
+    return (
+      <div className="my-3 p-4 rounded-xl border border-red-900 bg-red-950/20 text-red-400 text-xs font-mono">
+        <div className="font-semibold mb-1">Mermaid Render Error:</div>
+        <div>{error}</div>
+        <pre className="mt-2 p-2 bg-red-950/40 rounded overflow-x-auto text-[10px]">{code}</pre>
+      </div>
+    );
+  }
+
+  if (!svg) {
+    return (
+      <div className="my-3 p-4 rounded-xl border border-zinc-800 bg-zinc-900/20 animate-pulse text-zinc-500 text-xs text-center font-sans">
+        Rendering diagram...
+      </div>
+    );
+  }
+
+  return (
+    <div 
+      className="my-3 p-4 rounded-xl border border-zinc-800 bg-[#0d1117]/50 overflow-x-auto flex justify-center"
+      dangerouslySetInnerHTML={{ __html: svg }}
+    />
+  );
+}
+
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 export function MarkdownRenderer({ content }: MarkdownRendererProps) {
@@ -313,7 +376,11 @@ export function MarkdownRenderer({ content }: MarkdownRendererProps) {
     <div className="space-y-1">
       {parts.map((part, i) =>
         part.type === "code" ? (
-          <CodeBlock key={i} language={part.language} code={part.content} />
+          part.language === "mermaid" ? (
+            <MermaidBlock key={i} code={part.content} />
+          ) : (
+            <CodeBlock key={i} language={part.language} code={part.content} />
+          )
         ) : (
           <TextPart key={i} text={part.content} />
         )

@@ -30,6 +30,7 @@ import {
   ArrowRightLeft,
   Activity,
   List,
+  Download,
 } from "lucide-react";
 import type { ToolCall } from "@/types";
 
@@ -295,40 +296,80 @@ function tryParseJson(str?: string) {
 
 // ─── Rich Renderers ────────────────────────────────────────────────────────────
 
-/** DAX Query → scrollable result table */
+/** DAX Query → scrollable result table with CSV Export */
 function DaxQueryGrid({ data }: { data: any[] }) {
   if (!Array.isArray(data) || data.length === 0)
     return <p className="text-zinc-400 italic text-xs py-1">Empty dataset returned.</p>;
 
   const columns = Object.keys(data[0]);
+
+  const exportToCSV = () => {
+    const headers = columns.join(",");
+    const rows = data.map(row => 
+      columns.map(col => {
+        let val = row[col];
+        if (typeof val === "object" && val !== null) {
+          val = JSON.stringify(val);
+        }
+        const cell = val === null || val === undefined ? "" : String(val);
+        // Escape quotes for CSV compliance
+        const escaped = cell.replace(/"/g, '""');
+        return `"${escaped}"`;
+      }).join(",")
+    );
+    const csvContent = "\uFEFF" + [headers, ...rows].join("\r\n"); // UTF-8 BOM for Excel
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `query_result_${new Date().toISOString().slice(0, 19).replace(/[-:]/g, "")}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   return (
-    <div className="overflow-x-auto rounded-lg border border-zinc-200 mt-2 max-h-64 shadow-sm">
-      <table className="min-w-full divide-y divide-zinc-200 text-xs text-left">
-        <thead className="sticky top-0 bg-zinc-50 border-b border-zinc-200 z-10">
-          <tr>
-            {columns.map((col) => (
-              <th key={col} className="px-3 py-2 font-semibold text-zinc-800 border-r border-zinc-200 last:border-r-0 whitespace-nowrap font-sans">
-                {col}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody className="bg-white divide-y divide-zinc-100">
-          {data.map((row, i) => (
-            <tr key={i} className="hover:bg-zinc-50/60 transition-colors">
-              {columns.map((col) => {
-                const val = row[col];
-                const disp = typeof val === "object" && val !== null ? JSON.stringify(val) : String(val ?? "");
-                return (
-                  <td key={col} className="px-3 py-1.5 font-mono text-[11px] border-r border-zinc-100 last:border-r-0 whitespace-nowrap text-zinc-800">
-                    {disp}
-                  </td>
-                );
-              })}
+    <div className="mt-2">
+      <div className="flex justify-between items-center mb-1.5 px-1">
+        <span className="text-[10px] text-zinc-500 font-semibold uppercase tracking-wider font-sans">
+          Query Results ({data.length} rows)
+        </span>
+        <button
+          onClick={exportToCSV}
+          className="flex items-center gap-1 text-zinc-500 hover:text-zinc-800 transition-colors text-[10px] font-sans py-0.5 px-2 rounded hover:bg-zinc-100 border border-zinc-200 bg-zinc-50 shadow-sm"
+        >
+          <Download className="w-3 h-3 text-zinc-500" />
+          <span>Export CSV</span>
+        </button>
+      </div>
+      <div className="overflow-x-auto rounded-lg border border-zinc-200 max-h-64 shadow-sm">
+        <table className="min-w-full divide-y divide-zinc-200 text-xs text-left">
+          <thead className="sticky top-0 bg-zinc-50 border-b border-zinc-200 z-10">
+            <tr>
+              {columns.map((col) => (
+                <th key={col} className="px-3 py-2 font-semibold text-zinc-800 border-r border-zinc-200 last:border-r-0 whitespace-nowrap font-sans">
+                  {col}
+                </th>
+              ))}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody className="bg-white divide-y divide-zinc-100">
+            {data.map((row, i) => (
+              <tr key={i} className="hover:bg-zinc-50/60 transition-colors">
+                {columns.map((col) => {
+                  const val = row[col];
+                  const disp = typeof val === "object" && val !== null ? JSON.stringify(val) : String(val ?? "");
+                  return (
+                    <td key={col} className="px-3 py-1.5 font-mono text-[11px] border-r border-zinc-100 last:border-r-0 whitespace-nowrap text-zinc-800">
+                      {disp}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

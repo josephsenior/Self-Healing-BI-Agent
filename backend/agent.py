@@ -3,7 +3,7 @@ import uuid
 import logging
 import asyncio
 from typing import Dict, Any, List, Literal, Union, AsyncGenerator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, AsyncExitStack
 
 import openai
 import anthropic
@@ -65,6 +65,7 @@ Guidelines:
 - **Reasoning Rule**: For all complex questions or operations, you MUST outline your internal thought process and steps inside <thinking>...</thinking> tags *before* presenting your final answer or executing tool calls. Keep the text inside the tags focused on your engineering plans and analysis.
 - When modifying a model, explain what you are about to change and why.
 - Present query results in clear, formatted tables when possible.
+- If asked to visualize the schema, describe relationships, or show the model diagram, you can output a flowchart/diagram using Mermaid.js syntax inside a ```mermaid ... ``` code block. Represent tables as nodes and draw relationships between them showing keys/cardinality.
 - If a tool call fails, diagnose the error and suggest a fix.
 - Be concise but thorough in your explanations."""
 
@@ -161,50 +162,92 @@ def create_elicitation_callback(coordinator: ElicitationCoordinator):
     return callback
 
 # ==============================================================================
+# MULTI-SESSION ORCHESTRATOR
+# ==============================================================================
+class MultiClientSession:
+    """
+    Orchestrates communication with multiple MCP servers concurrently.
+    Exposes a unified interface that routes list_tools and call_tool actions.
+    """
+    def __init__(self, sessions: List[ClientSession]):
+        self.sessions = sessions
+        self.tool_to_session = {}
+
+    async def list_tools(self) -> types.ListToolsResult:
+        all_tools = []
+        for session in self.sessions:
+            try:
+                res = await session.list_tools()
+                for tool in res.tools:
+                    all_tools.append(tool)
+                    self.tool_to_session[tool.name] = session
+            except Exception as e:
+                logger.error(f"Error listing tools from session: {e}")
+        return types.ListToolsResult(tools=all_tools)
+
+    async def call_tool(self, name: str, arguments: dict):
+        session = self.tool_to_session.get(name)
+        if not session:
+            # Refresh mappings in case tools were registered dynamically
+            await self.list_tools()
+            session = self.tool_to_session.get(name)
+            if not session:
+                raise ValueError(f"Tool '{name}' not found in any active MCP session.")
+        return await session.call_tool(name, arguments)
+
+# ==============================================================================
 # DUAL-TRANSPORT MCP CLIENT SESSION
 # ==============================================================================
 @asynccontextmanager
-async def mcp_session_scope(coordinator: ElicitationCoordinator) -> AsyncGenerator[ClientSession, None]:
+async def mcp_session_scope(coordinator: ElicitationCoordinator) -> AsyncGenerator[MultiClientSession, None]:
     """
-    Context manager to yield an initialized ClientSession based on the
-    transport_mode configuration (SSE or STDIO).
+    Context manager to yield a MultiClientSession containing connections to both
+    the active Power BI server (SSE or STDIO) and the custom helper tools server.
     """
+    import os
+    import shutil
+    import sys
     elicitation_cb = create_elicitation_callback(coordinator)
 
-    if config.transport_mode.upper() == "SSE":
-        logger.info(f"Connecting to remote Power BI server via SSE: {config.sse_url}")
-        headers = {}
-        if config.fabric_access_token:
-            headers["Authorization"] = f"Bearer {config.fabric_access_token}"
+    async with AsyncExitStack() as stack:
+        sessions = []
 
-        async with sse_client(url=config.sse_url, headers=headers) as (read_stream, write_stream):
-            async with ClientSession(read_stream, write_stream, elicitation_callback=elicitation_cb) as session:
-                await session.initialize()
-                yield session
-    else:
-        import os
-        import shutil
-        stdio_cmd = config.stdio_command
-        if os.name == "nt" and not stdio_cmd.endswith((".exe", ".cmd", ".bat")):
-            for ext in (".cmd", ".bat", ".exe"):
-                if shutil.which(stdio_cmd + ext):
-                    stdio_cmd = stdio_cmd + ext
-                    break
-            if not stdio_cmd.endswith((".cmd", ".bat", ".exe")):
-                default_node_npx = os.path.join("C:\\Program Files\\nodejs", stdio_cmd + ".cmd")
-                if os.path.exists(default_node_npx):
-                    stdio_cmd = default_node_npx
-        
-        # Prepend Node.js directory to PATH to avoid 'node' command not found errors
-        node_dir = r"C:\Program Files\nodejs"
-        custom_env = os.environ.copy()
-        custom_env["PATH"] = node_dir + os.pathsep + custom_env.get("PATH", "")
+        # 1. Initialize Power BI Client Session
+        if config.transport_mode.upper() == "SSE":
+            logger.info(f"Connecting to remote Power BI server via SSE: {config.sse_url}")
+            headers = {}
+            if config.fabric_access_token:
+                headers["Authorization"] = f"Bearer {config.fabric_access_token}"
 
-        logger.info(f"Connecting to local Power BI modeling server via STDIO. Executable: {stdio_cmd}")
-        is_npx = "npx" in stdio_cmd.lower()
-        use_fast_startup = is_npx and config.stdio_args and "@microsoft/powerbi-modeling-mcp" in config.stdio_args
+            read_stream, write_stream = await stack.enter_async_context(
+                sse_client(url=config.sse_url, headers=headers)
+            )
+            pbi_session = await stack.enter_async_context(
+                ClientSession(read_stream, write_stream, elicitation_callback=elicitation_cb)
+            )
+            await pbi_session.initialize()
+            sessions.append(pbi_session)
+        else:
+            stdio_cmd = config.stdio_command
+            if os.name == "nt" and not stdio_cmd.endswith((".exe", ".cmd", ".bat")):
+                for ext in (".cmd", ".bat", ".exe"):
+                    if shutil.which(stdio_cmd + ext):
+                        stdio_cmd = stdio_cmd + ext
+                        break
+                if not stdio_cmd.endswith((".cmd", ".bat", ".exe")):
+                    default_node_npx = os.path.join("C:\\Program Files\\nodejs", stdio_cmd + ".cmd")
+                    if os.path.exists(default_node_npx):
+                        stdio_cmd = default_node_npx
+            
+            node_dir = r"C:\Program Files\nodejs"
+            custom_env = os.environ.copy()
+            custom_env["PATH"] = node_dir + os.pathsep + custom_env.get("PATH", "")
 
-        try:
+            logger.info(f"Connecting to local Power BI modeling server via STDIO. Executable: {stdio_cmd}")
+            is_npx = "npx" in stdio_cmd.lower()
+            use_fast_startup = is_npx and config.stdio_args and "@microsoft/powerbi-modeling-mcp" in config.stdio_args
+
+            pbi_session = None
             if use_fast_startup:
                 try:
                     logger.info("Attempting fast startup with --no-install...")
@@ -214,34 +257,65 @@ async def mcp_session_scope(coordinator: ElicitationCoordinator) -> AsyncGenerat
                         args=fast_args,
                         env=custom_env
                     )
-                    async with stdio_client(server_params) as (read_stream, write_stream):
-                        async with ClientSession(read_stream, write_stream, elicitation_callback=elicitation_cb) as session:
-                            await session.initialize()
-                            logger.info("Fast startup succeeded.")
-                            try:
-                                yield session
-                            except (GeneratorExit, asyncio.CancelledError):
-                                logger.info("Session context generator exited or cancelled.")
-                            return
+                    read_stream, write_stream = await stack.enter_async_context(
+                        stdio_client(server_params)
+                    )
+                    pbi_session = await stack.enter_async_context(
+                        ClientSession(read_stream, write_stream, elicitation_callback=elicitation_cb)
+                    )
+                    await pbi_session.initialize()
+                    logger.info("Fast startup succeeded.")
                 except Exception as e:
                     logger.warning(f"Fast startup failed: {e}. Falling back to standard startup...")
 
-            server_params = StdioServerParameters(
-                command=stdio_cmd,
-                args=config.stdio_args,
-                env=custom_env
-            )
-            async with stdio_client(server_params) as (read_stream, write_stream):
-                async with ClientSession(read_stream, write_stream, elicitation_callback=elicitation_cb) as session:
-                    await session.initialize()
-                    try:
-                        yield session
-                    except (GeneratorExit, asyncio.CancelledError):
-                        logger.info("Session context generator exited or cancelled.")
-        except BaseExceptionGroup as eg:
-            logger.info("Handled TaskGroup exception group during session cleanup.")
+            if pbi_session is None:
+                server_params = StdioServerParameters(
+                    command=stdio_cmd,
+                    args=config.stdio_args,
+                    env=custom_env
+                )
+                read_stream, write_stream = await stack.enter_async_context(
+                    stdio_client(server_params)
+                )
+                pbi_session = await stack.enter_async_context(
+                    ClientSession(read_stream, write_stream, elicitation_callback=elicitation_cb)
+                )
+                await pbi_session.initialize()
+            
+            sessions.append(pbi_session)
+
+        # 2. Initialize Custom Helper MCP Server Session
+        custom_server_script = str(ROOT_DIR / "backend" / "custom_mcp_server.py")
+        logger.info(f"Connecting to Custom MCP helper server via STDIO: {custom_server_script}")
+        custom_env = os.environ.copy()
+        
+        custom_params = StdioServerParameters(
+            command=sys.executable,
+            args=[custom_server_script],
+            env=custom_env
+        )
+        
+        c_read, c_write = await stack.enter_async_context(
+            stdio_client(custom_params)
+        )
+        custom_session = await stack.enter_async_context(
+            ClientSession(c_read, c_write)
+        )
+        await custom_session.initialize()
+        sessions.append(custom_session)
+
+        # Yield the unified Multi-Session orchestrator wrapper
+        multi_session = MultiClientSession(sessions)
+        await multi_session.list_tools()  # Warm up the tool mapping cache
+        
+        try:
+            yield multi_session
+        except (GeneratorExit, asyncio.CancelledError):
+            logger.info("Multi-Session context generator exited or cancelled.")
+        except BaseExceptionGroup:
+            logger.info("Handled exception group during Multi-Session cleanup.")
         except Exception as e:
-            logger.error(f"Error in session scope: {e}")
+            logger.error(f"Error inside multi-session execution: {e}")
 
 # ==============================================================================
 # TOOL SCHEMAS MAPPING

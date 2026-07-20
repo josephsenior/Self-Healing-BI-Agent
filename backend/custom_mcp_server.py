@@ -276,5 +276,107 @@ def preview_pbir_report(project_path: str) -> str:
         indent=2,
     )
 
+
+@mcp.tool()
+def check_powerbi_cloud_qa_readiness() -> str:
+    """Check cloud publishing, PNG rendering, and visual-review configuration."""
+    vision_provider = os.getenv("POWERBI_VISION_PROVIDER", os.getenv("LLM_PROVIDER", "gemini")).lower()
+    vision_key_name = {
+        "openai": "OPENAI_API_KEY",
+        "anthropic": "ANTHROPIC_API_KEY",
+        "gemini": "GEMINI_API_KEY",
+    }.get(vision_provider, "")
+    has_client_credentials = all(os.getenv(name) for name in (
+        "AZURE_TENANT_ID", "AZURE_CLIENT_ID", "AZURE_CLIENT_SECRET"
+    ))
+    checks = {
+        "workspace_id": bool(os.getenv("POWERBI_STAGING_WORKSPACE_ID")),
+        "fabric_auth": bool(os.getenv("FABRIC_API_ACCESS_TOKEN")) or has_client_credentials,
+        "powerbi_auth": bool(os.getenv("POWERBI_API_ACCESS_TOKEN")) or has_client_credentials,
+        "vision_provider": vision_provider,
+        "vision_model": bool(os.getenv("POWERBI_VISION_MODEL") or os.getenv("LLM_MODEL")),
+        "vision_api_key": bool(vision_key_name and os.getenv(vision_key_name)),
+    }
+    required = ["workspace_id", "fabric_auth", "powerbi_auth", "vision_model", "vision_api_key"]
+    return json.dumps({
+        "ready": all(bool(checks[item]) for item in required),
+        "checks": checks,
+    }, indent=2)
+
+
+@mcp.tool()
+def publish_pbir_to_fabric(
+    project_path: str,
+    display_name: str,
+    semantic_model_id: str = "",
+    report_id: str = "",
+) -> str:
+    """Create or update a report in the configured Fabric staging workspace."""
+    from report_authoring.cloud import CloudConfig, FabricReportPublisher
+
+    result = FabricReportPublisher(CloudConfig.from_env()).publish(
+        _allowed_authoring_path(project_path),
+        display_name=display_name,
+        semantic_model_id=semantic_model_id or None,
+        report_id=report_id or None,
+    )
+    return json.dumps(result.to_dict(), indent=2)
+
+
+@mcp.tool()
+def render_powerbi_report(
+    report_id: str,
+    page_names: List[str] | None = None,
+    locale: str = "en-US",
+) -> str:
+    """Render a staged Fabric report to real Power BI PNG screenshots."""
+    from report_authoring.cloud import CloudConfig, PowerBIExportRenderer
+
+    output = AUTHORING_ROOT / ".pbir-previews" / report_id / uuid.uuid4().hex
+    result = PowerBIExportRenderer(CloudConfig.from_env()).render_report(
+        report_id,
+        output,
+        page_names=page_names or None,
+        locale=locale,
+    )
+    return json.dumps(result.to_dict(), indent=2)
+
+
+@mcp.tool()
+def review_powerbi_render(
+    artifact_paths: List[str],
+    project_path: str,
+    provider: str = "",
+    model: str = "",
+) -> str:
+    """Let the configured multimodal model inspect rendered Power BI screenshots."""
+    from report_authoring.preview import build_preview_manifest
+    from report_authoring.visual_review import review_rendered_report
+
+    images = [_allowed_authoring_path(value) for value in artifact_paths]
+    manifest = build_preview_manifest(_allowed_authoring_path(project_path))
+    review = review_rendered_report(
+        images,
+        manifest,
+        provider=provider or None,
+        model=model or None,
+    )
+    return json.dumps(review.to_dict(), indent=2)
+
+
+@mcp.tool()
+def decide_powerbi_visual_qa_iteration(
+    review: Dict[str, Any],
+    attempt: int,
+    max_attempts: int = 3,
+) -> str:
+    """Apply the bounded retry policy to structured visual-review findings."""
+    from report_authoring.visual_review import VisualReview, decide_visual_qa_iteration
+
+    decision = decide_visual_qa_iteration(
+        VisualReview.model_validate(review), attempt, max_attempts
+    )
+    return json.dumps(decision.model_dump(), indent=2)
+
 if __name__ == "__main__":
     mcp.run()

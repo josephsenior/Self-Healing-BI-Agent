@@ -1,11 +1,29 @@
 from .compiler import CompilationResult, compile_report
 from .models import DashboardSpec
 from .pbir import inspect_pbir_project, validate_pbir_project
+from .cloud import (
+    CloudConfig,
+    FabricReportPublisher,
+    PowerBIExportRenderer,
+    build_report_definition_parts,
+)
+from .visual_review import (
+    VisualReview,
+    decide_visual_qa_iteration,
+    review_rendered_report,
+)
 
 __all__ = [
-    CompilationResult,
-    DashboardSpec,
-    compile_report,
-    inspect_pbir_project,
-    validate_pbir_project,
+    "CompilationResult",
+    "DashboardSpec",
+    "compile_report",
+    "inspect_pbir_project",
+    "validate_pbir_project",
+    "CloudConfig",
+    "FabricReportPublisher",
+    "PowerBIExportRenderer",
+    "build_report_definition_parts",
+    "VisualReview",
+    "decide_visual_qa_iteration",
+    "review_rendered_report",
 ]

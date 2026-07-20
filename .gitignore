@@ -40,3 +40,4 @@ build/
 .server-logs/
 .pbir-staging/
 .pbir-schema-cache/
+.pbir-previews/

@@ -35,3 +35,8 @@ build/
 *.njsproj
 *.sln
 *.swp
+
+# Local runtime and generated report change sets
+.server-logs/
+.pbir-staging/
+.pbir-schema-cache/

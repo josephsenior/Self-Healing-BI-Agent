@@ -1,4 +1,5 @@
 import sys
+import json
 import os
 import subprocess
 import uuid
@@ -155,6 +156,125 @@ def run_python_sandbox(code: str) -> str:
                 os.remove(temp_filename)
             except Exception:
                 pass
+
+
+
+# ==============================================================================
+# PBIR REPORT AUTHORING (STAGING ONLY)
+# ==============================================================================
+from pathlib import Path
+from report_authoring import (
+    DashboardSpec,
+    compile_report,
+    inspect_pbir_project,
+    validate_pbir_project,
+)
+from report_authoring.layout import validate_page_layout
+
+AUTHORING_ROOT = Path(
+    os.getenv("POWERBI_AUTHORING_ROOT", Path(__file__).resolve().parent.parent)
+).resolve()
+
+
+def _allowed_authoring_path(value: str) -> Path:
+    candidate = Path(value)
+    if not candidate.is_absolute():
+        candidate = AUTHORING_ROOT / candidate
+    candidate = candidate.resolve()
+    try:
+        candidate.relative_to(AUTHORING_ROOT)
+    except ValueError as exc:
+        raise ValueError(
+            f"path must remain under POWERBI_AUTHORING_ROOT: {AUTHORING_ROOT}"
+        ) from exc
+    return candidate
+
+
+@mcp.tool()
+def validate_dashboard_spec(spec: Dict[str, Any]) -> str:
+    """Validate a dashboard specification without writing files."""
+    dashboard = DashboardSpec.model_validate(spec)
+    layout_errors = [
+        f"{page.name}: {error}"
+        for page in dashboard.pages
+        for error in validate_page_layout(page)
+    ]
+    return json.dumps({
+        "valid": not layout_errors,
+        "layout_errors": layout_errors,
+        "normalized_spec": dashboard.model_dump(by_alias=True),
+    }, indent=2)
+
+
+@mcp.tool()
+def stage_pbir_report(spec: Dict[str, Any]) -> str:
+    """Compile a dashboard specification into an isolated PBIR change set."""
+    dashboard = DashboardSpec.model_validate(spec)
+    result = compile_report(dashboard, AUTHORING_ROOT / ".pbir-staging")
+    return json.dumps(result.to_dict(), indent=2)
+
+
+@mcp.tool()
+def validate_pbir_report(project_path: str) -> str:
+    """Structurally validate an enhanced PBIR report project."""
+    report = validate_pbir_project(_allowed_authoring_path(project_path))
+    return json.dumps(report.to_dict(), indent=2)
+
+
+@mcp.tool()
+def inspect_pbir_report(project_path: str) -> str:
+    """List pages and visuals in an enhanced PBIR report project."""
+    result = inspect_pbir_project(_allowed_authoring_path(project_path))
+    return json.dumps(result, indent=2)
+
+
+
+@mcp.tool()
+def validate_dashboard_semantics(spec: Dict[str, Any], catalog: Dict[str, Any]) -> str:
+    """Validate every visual field against a semantic-model catalog."""
+    from report_authoring.semantic import SemanticModelCatalog, validate_dashboard_semantics as run
+    dashboard = DashboardSpec.model_validate(spec)
+    issues = run(dashboard, SemanticModelCatalog.model_validate(catalog))
+    return json.dumps({
+        "valid": not any(item.severity == "error" for item in issues),
+        "issues": [item.to_dict() for item in issues],
+    }, indent=2)
+
+
+@mcp.tool()
+def evaluate_dashboard_quality(spec: Dict[str, Any]) -> str:
+    """Run report density, sizing, and readability diagnostics."""
+    from report_authoring.quality import evaluate_report_quality
+    issues = evaluate_report_quality(DashboardSpec.model_validate(spec))
+    return json.dumps({
+        "valid": not any(item.severity == "error" for item in issues),
+        "issues": [item.to_dict() for item in issues],
+    }, indent=2)
+
+
+@mcp.tool()
+def validate_pbir_official_schemas(
+    project_path: str,
+    allow_schema_download: bool = False,
+) -> str:
+    """Validate report documents against allowlisted Microsoft PBIR schemas."""
+    report = validate_pbir_project(
+        _allowed_authoring_path(project_path),
+        official_schemas=True,
+        allow_schema_download=allow_schema_download,
+        schema_cache=AUTHORING_ROOT / ".pbir-schema-cache",
+    )
+    return json.dumps(report.to_dict(), indent=2)
+
+
+@mcp.tool()
+def preview_pbir_report(project_path: str) -> str:
+    """Return a deterministic page and visual preview manifest."""
+    from report_authoring.preview import build_preview_manifest
+    return json.dumps(
+        build_preview_manifest(_allowed_authoring_path(project_path)),
+        indent=2,
+    )
 
 if __name__ == "__main__":
     mcp.run()

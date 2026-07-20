@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useLayoutEffect, useRef } from "react";
 import { Terminal, MessageSquare, RefreshCw } from "lucide-react";
 import { useAgent } from "@/hooks/use-agent";
 import { Sidebar } from "@/components/sidebar";
@@ -27,6 +27,7 @@ export default function Home() {
   const [agentConfig, setAgentConfig] = useState<AgentConfig | null>(null);
   const [reasoningEffort, setReasoningEffort] = useState<string>("medium");
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const isPinnedToBottomRef = useRef(true);
 
   // Fetch agent config on mount
   useEffect(() => {
@@ -56,25 +57,29 @@ export default function Home() {
     return false;
   };
 
-  // Auto-scroll messages only if user was already at bottom or if last message is from user
-  useEffect(() => {
+  // Keep streaming content pinned unless the user intentionally scrolls up.
+  const handleMessagesScroll = () => {
     const container = scrollContainerRef.current;
     if (!container) return;
 
-    // Check if the user is near the bottom (threshold of 120px)
-    const isAtBottom =
-      container.scrollHeight - container.scrollTop - container.clientHeight < 120;
+    const distanceFromBottom =
+      container.scrollHeight - container.scrollTop - container.clientHeight;
+    isPinnedToBottomRef.current = distanceFromBottom <= 120;
+  };
 
-    // Check if the last message is from the user
+  useLayoutEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+
     const lastMessageIsUser =
       messages.length > 0 && messages[messages.length - 1].role === "user";
 
-    // If user is at bottom or just sent a message, auto-scroll down
-    if (isAtBottom || lastMessageIsUser) {
-      container.scrollTo({
-        top: container.scrollHeight,
-        behavior: "smooth",
-      });
+    if (lastMessageIsUser) {
+      isPinnedToBottomRef.current = true;
+    }
+
+    if (isPinnedToBottomRef.current) {
+      container.scrollTop = container.scrollHeight;
     }
   }, [messages, activeToolCalls]);
 
@@ -152,7 +157,11 @@ export default function Home() {
         </div>
 
         {/* Scrollable messages */}
-        <div ref={scrollContainerRef} className="flex-1 overflow-y-auto p-6 space-y-4">
+        <div
+          ref={scrollContainerRef}
+          onScroll={handleMessagesScroll}
+          className="flex-1 overflow-y-auto p-6 space-y-4"
+        >
           {messages.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center text-zinc-400 space-y-3">
               <MessageSquare className="w-12 h-12 text-zinc-300" />

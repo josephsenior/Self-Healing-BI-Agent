@@ -5,6 +5,7 @@ import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from unittest.mock import patch
 
 import httpx
 from pydantic import ValidationError
@@ -88,6 +89,11 @@ from backend.report_authoring.visual_review import (
     VisualReview,
     decide_visual_qa_iteration,
 )
+from backend.report_authoring.desktop import (
+    open_report_in_powerbi_desktop,
+    prepare_report_for_desktop,
+)
+from backend.report_authoring.workspace import DashboardWorkspaceManager
 
 
 class MilestoneTwoTests(unittest.TestCase):
@@ -209,6 +215,96 @@ class CloudVisualQATests(unittest.TestCase):
         final = decide_visual_qa_iteration(review, attempt=3, max_attempts=3)
         self.assertTrue(first.should_revise)
         self.assertFalse(final.should_revise)
+
+
+class DesktopVisualHandoffTests(unittest.TestCase):
+    def test_prepares_staged_report_for_real_desktop_rendering(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as root_value:
+            root = Path(root_value)
+            model = root / "Sales.SemanticModel"
+            model.mkdir()
+            (model / "definition.pbism").write_text("{}", encoding="utf-8")
+            compiled = compile_report(sample_spec(), root / "staging")
+            result = prepare_report_for_desktop(compiled.report_path, model)
+            definition = json.loads(Path(result.pbir_path).read_text(encoding="utf-8"))
+            reference = definition["datasetReference"]["byPath"]["path"]
+            self.assertEqual(reference, result.relative_model_path)
+            self.assertEqual(
+                (Path(compiled.report_path) / reference).resolve(), model.resolve()
+            )
+            self.assertTrue(result.validation["valid"])
+
+    def test_desktop_open_uses_definition_pbir_file(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as root:
+            compiled = compile_report(sample_spec(), root)
+            with patch("backend.report_authoring.desktop.os.startfile") as startfile:
+                opened = open_report_in_powerbi_desktop(compiled.report_path)
+            startfile.assert_called_once_with(opened)
+            self.assertTrue(opened.endswith("definition.pbir"))
+
+
+class StatefulDashboardWorkspaceTests(unittest.TestCase):
+    def _model(self, root: Path) -> Path:
+        model = root / "Sales.SemanticModel"
+        model.mkdir()
+        (model / "definition.pbism").write_text("{}", encoding="utf-8")
+        return model
+
+    def test_active_dashboard_survives_manager_restart(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as root_value:
+            root = Path(root_value)
+            manager = DashboardWorkspaceManager(root / "workspaces")
+            created = manager.create(sample_spec(), str(self._model(root)))
+            restarted = DashboardWorkspaceManager(root / "workspaces")
+            state = restarted.get()
+            self.assertEqual(state["dashboard"]["dashboard_id"], created.dashboard_id)
+            self.assertEqual(state["dashboard"]["active_version"], 1)
+            self.assertEqual(state["current"]["spec"]["title"], "Executive Sales")
+
+    def test_revision_is_immutable_and_conflict_checked(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as root_value:
+            root = Path(root_value)
+            manager = DashboardWorkspaceManager(root / "workspaces")
+            manager.create(sample_spec(), str(self._model(root)))
+            revised = sample_spec().model_copy(deep=True)
+            revised.pages[0].visuals[0].title = "Net Revenue"
+            result = manager.revise(revised, "Clarify KPI title", expected_version=1)
+            self.assertEqual(result.version, 2)
+            first = json.loads(Path(manager.get()["current"]["spec_path"]).read_text())
+            self.assertEqual(first["version"], 2)
+            original = json.loads(
+                (manager.root / result.dashboard_id / "versions" / "0001.json").read_text()
+            )
+            self.assertEqual(original["spec"]["pages"][0]["visuals"][0]["title"], "Revenue")
+            with self.assertRaises(RuntimeError):
+                manager.revise(revised, "Stale edit", expected_version=1)
+
+    def test_audit_versions_and_rollback(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as root_value:
+            root = Path(root_value)
+            manager = DashboardWorkspaceManager(root / "workspaces")
+            created = manager.create(sample_spec(), str(self._model(root)))
+            revised = sample_spec().model_copy(deep=True)
+            revised.pages[0].display_name = "Leadership"
+            manager.revise(revised, "Leadership wording", expected_version=1)
+            audit = manager.audit()
+            self.assertTrue(audit["valid"])
+            self.assertEqual(audit["version"], 2)
+            self.assertEqual(len(manager.list_versions()), 2)
+            rollback = manager.rollback(1)
+            self.assertEqual(rollback.version, 3)
+            current = manager.get()["current"]
+            self.assertEqual(current["spec"], json.loads(Path(created.spec_path).read_text())["spec"])
+
+    def test_open_active_uses_saved_semantic_model(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as root_value:
+            root = Path(root_value)
+            manager = DashboardWorkspaceManager(root / "workspaces")
+            manager.create(sample_spec(), str(self._model(root)))
+            with patch("backend.report_authoring.desktop.os.startfile"):
+                opened = manager.open_active_in_desktop()
+            self.assertTrue(opened["opened"])
+            self.assertEqual(opened["version"], 1)
 
 if __name__ == "__main__":
     unittest.main()

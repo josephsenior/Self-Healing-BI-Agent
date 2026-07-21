@@ -6,12 +6,18 @@ export interface ToolCall {
   error?: string;
 }
 
+export type MessagePart =
+  | { type: "reasoning"; text: string }
+  | { type: "text"; text: string }
+  | { type: "tool_call"; toolCall: ToolCall };
+
 export interface ChatMessage {
   id: string;
   role: "user" | "assistant";
   content: string;
   reasoningContent?: string;
   toolCalls?: ToolCall[];
+  parts?: MessagePart[];
   timestamp: Date;
 }
 

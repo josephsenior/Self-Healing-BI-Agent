@@ -1,16 +1,30 @@
 "use client";
 
-import React, { useState, useEffect, useLayoutEffect, useRef } from "react";
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from "react";
 import { Terminal, MessageSquare, RefreshCw } from "lucide-react";
 import { useAgent } from "@/hooks/use-agent";
 import { Sidebar } from "@/components/sidebar";
 import { ChatMessageBubble } from "@/components/chat-message";
-import { ToolCallCard } from "@/components/tool-call-card";
 import { ChatInput } from "@/components/chat-input";
 import { ElicitationModal } from "@/components/elicitation-modal";
 import type { AgentConfig } from "@/types";
 
 export default function Home() {
+  const [backendUrls, setBackendUrls] = useState({
+    http: "http://localhost:8000",
+    ws: "ws://localhost:8000/ws/chat",
+  });
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const hostname = window.location.hostname || "localhost";
+      setBackendUrls({
+        http: process.env.NEXT_PUBLIC_BACKEND_HTTP_URL ?? `http://${hostname}:8000`,
+        ws: process.env.NEXT_PUBLIC_BACKEND_WS_URL ?? `ws://${hostname}:8000/ws/chat`,
+      });
+    }
+  }, []);
+
   const {
     connectionStatus,
     agentStatus,
@@ -22,24 +36,37 @@ export default function Home() {
     respondToElicitation,
     abort,
     reconnect,
-  } = useAgent("ws://localhost:8000/ws/chat");
+  } = useAgent(backendUrls.ws);
 
   const [agentConfig, setAgentConfig] = useState<AgentConfig | null>(null);
   const [reasoningEffort, setReasoningEffort] = useState<string>("medium");
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const isPinnedToBottomRef = useRef(true);
 
-  // Fetch agent config on mount
+  const fetchConfig = useCallback(async () => {
+    try {
+      const res = await fetch(`${backendUrls.http}/api/config`);
+      if (res.ok) {
+        const data: AgentConfig = await res.json();
+        setAgentConfig(data);
+      }
+    } catch {
+      setAgentConfig(null);
+    }
+  }, [backendUrls.http]);
+
+  // Fetch agent config on mount and retry periodically if missing
   useEffect(() => {
-    fetch("http://localhost:8000/api/config")
-      .then((res) => res.json())
-      .then((data: AgentConfig) => setAgentConfig(data))
-      .catch(() => setAgentConfig(null));
-  }, []);
+    fetchConfig();
+    const interval = setInterval(() => {
+      fetchConfig();
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [fetchConfig]);
 
   const handleConfigUpdate = async (newConfig: AgentConfig) => {
     try {
-      const res = await fetch("http://localhost:8000/api/config", {
+      const res = await fetch(`${backendUrls.http}/api/config`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -182,20 +209,6 @@ export default function Home() {
                 }
               />
             ))
-          )}
-
-          {/* Active tool calls */}
-          {activeToolCalls.length > 0 && (
-            <div className="animate-fade-in">
-              <div className="max-w-[75%] rounded-lg p-4 bg-zinc-100/50 border border-zinc-200 space-y-2">
-                <div className="text-[11px] font-semibold text-zinc-450 uppercase tracking-wider mb-2">
-                  Processing
-                </div>
-                {activeToolCalls.map((tc) => (
-                  <ToolCallCard key={tc.id} toolCall={tc} />
-                ))}
-              </div>
-            </div>
           )}
         </div>
 

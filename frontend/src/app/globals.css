@@ -94,6 +94,21 @@
   animation: pulseDot 1.5s ease-in-out infinite;
 }
 
+@keyframes tool-progress {
+  0% { left: -34%; }
+  55% { left: 52%; }
+  100% { left: 100%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-in,
+  .animate-slide-up,
+  .animate-pulse-dot,
+  [class*="animate-[tool-progress"] {
+    animation: none !important;
+  }
+}
+
 /* ==========================================
    Syntax Highlighting (Code Blocks)
    These must live in globals.css to prevent

@@ -34,6 +34,62 @@ converted into deterministic PBIR pixel positions.
 A local model reference normally looks like ../Sales.SemanticModel. A report
 targeting a model in Fabric can provide semantic_model_id instead.
 
+## Real visual testing in Power BI Desktop
+
+Power BI Desktop can open a report's `definition.pbir` directly. For a real
+local render, first save the source model through Desktop as a Power BI Project
+so that a `<Name>.SemanticModel` folder containing `definition.pbism` exists.
+Enable the **Store reports using enhanced metadata format (PBIR)** preview
+feature in Desktop.
+
+After staging and validation:
+
+1. Call `prepare_pbir_for_powerbi_desktop` with the staged report path and the
+   local `.SemanticModel` folder. The tool rewrites only the staged report's
+   `datasetReference.byPath` using a correct relative path and revalidates it.
+2. Call `open_pbir_in_powerbi_desktop` to launch the generated
+   `definition.pbir` through Windows.
+3. Power BI Desktop loads the real semantic model and renders the actual report
+   visuals. External changes require Desktop to reopen the report.
+
+This path is free and uses the real Power BI rendering engine. It gives the user
+a real visual test, but the agent still cannot inspect the rendered pixels
+automatically unless Desktop screenshot automation is added.
+
+## Stateful dashboard editing
+
+The agent keeps generated dashboards in `.dashboard-workspaces` so follow-up
+requests can refer to "the current dashboard" without repeating the complete
+specification or explaining how PBIR should be edited. The directory is local
+runtime state and is ignored by Git.
+
+For a new dashboard, `create_dashboard_workspace` stores the canonical
+`DashboardSpec`, compiles it, records validation results, and makes it active.
+If a local `.SemanticModel` path is provided, that association is retained for
+future revisions and Desktop launches.
+
+For follow-up requests, the agent should:
+
+1. Load the current specification with `get_active_dashboard`.
+2. Inspect its current quality with `audit_active_dashboard`.
+3. Decide the appropriate changes from the user's outcome, semantic metadata,
+   and audit findings.
+4. Submit the complete revised specification through
+   `revise_active_dashboard`, including the version it started from.
+5. Open the rebuilt report through
+   `open_active_dashboard_in_powerbi_desktop` when a model path is available.
+
+Every accepted revision creates an immutable version and a separate compiled
+build. Optimistic version checks prevent an older edit from overwriting a newer
+one. `list_dashboard_versions` exposes the history, and `rollback_dashboard`
+restores an earlier specification by creating a new version rather than
+deleting history.
+
+Examples of sufficient follow-up instructions are: "improve the current
+dashboard", "add a regional analysis page", or "undo the last change". The
+agent owns the load, audit, revision, validation, versioning, rebuild, and
+Desktop handoff mechanics.
+
 ## Validation scope
 
 The subsystem validates the intermediate model, required PBIR files, page and

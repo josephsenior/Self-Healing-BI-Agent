@@ -41,3 +41,4 @@ build/
 .pbir-staging/
 .pbir-schema-cache/
 .pbir-previews/
+.dashboard-workspaces/

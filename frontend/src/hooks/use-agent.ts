@@ -58,20 +58,38 @@ export function useAgent(url: string): UseAgentReturn {
 
       case "token":
         setMessages((prev) => {
-          if (prev.length === 0 || prev[prev.length - 1].role !== "assistant") {
-            return [
-              ...prev,
-              {
-                id: crypto.randomUUID(),
-                role: "assistant",
-                content: payload.text,
-                timestamp: new Date(),
-              },
-            ];
-          }
           const updated = [...prev];
-          const last = { ...updated[updated.length - 1] };
+          let last: ChatMessage;
+
+          if (updated.length === 0 || updated[updated.length - 1].role !== "assistant") {
+            last = {
+              id: crypto.randomUUID(),
+              role: "assistant",
+              content: payload.text,
+              reasoningContent: "",
+              toolCalls: [],
+              parts: [{ type: "text", text: payload.text }],
+              timestamp: new Date(),
+            };
+            return [...updated, last];
+          }
+
+          last = { ...updated[updated.length - 1] };
           last.content = (last.content || "") + payload.text;
+
+          const parts = [...(last.parts || [])];
+          const lastPart = parts.length > 0 ? parts[parts.length - 1] : null;
+
+          if (lastPart && lastPart.type === "text") {
+            parts[parts.length - 1] = {
+              ...lastPart,
+              text: lastPart.text + payload.text,
+            };
+          } else {
+            parts.push({ type: "text", text: payload.text });
+          }
+
+          last.parts = parts;
           updated[updated.length - 1] = last;
           return updated;
         });
@@ -79,21 +97,38 @@ export function useAgent(url: string): UseAgentReturn {
 
       case "reasoning_token":
         setMessages((prev) => {
-          if (prev.length === 0 || prev[prev.length - 1].role !== "assistant") {
-            return [
-              ...prev,
-              {
-                id: crypto.randomUUID(),
-                role: "assistant",
-                content: "",
-                reasoningContent: payload.text,
-                timestamp: new Date(),
-              },
-            ];
-          }
           const updated = [...prev];
-          const last = { ...updated[updated.length - 1] };
+          let last: ChatMessage;
+
+          if (updated.length === 0 || updated[updated.length - 1].role !== "assistant") {
+            last = {
+              id: crypto.randomUUID(),
+              role: "assistant",
+              content: "",
+              reasoningContent: payload.text,
+              toolCalls: [],
+              parts: [{ type: "reasoning", text: payload.text }],
+              timestamp: new Date(),
+            };
+            return [...updated, last];
+          }
+
+          last = { ...updated[updated.length - 1] };
           last.reasoningContent = (last.reasoningContent || "") + payload.text;
+
+          const parts = [...(last.parts || [])];
+          const lastPart = parts.length > 0 ? parts[parts.length - 1] : null;
+
+          if (lastPart && lastPart.type === "reasoning") {
+            parts[parts.length - 1] = {
+              ...lastPart,
+              text: lastPart.text + payload.text,
+            };
+          } else {
+            parts.push({ type: "reasoning", text: payload.text });
+          }
+
+          last.parts = parts;
           updated[updated.length - 1] = last;
           return updated;
         });
@@ -106,6 +141,39 @@ export function useAgent(url: string): UseAgentReturn {
           arguments: c.arguments,
         }));
         setActiveToolCalls((prev) => [...prev, ...started]);
+
+        setMessages((prev) => {
+          const updated = [...prev];
+          let last: ChatMessage;
+
+          if (updated.length === 0 || updated[updated.length - 1].role !== "assistant") {
+            last = {
+              id: crypto.randomUUID(),
+              role: "assistant",
+              content: "",
+              reasoningContent: "",
+              toolCalls: [...started],
+              parts: started.map((tc) => ({ type: "tool_call", toolCall: tc })),
+              timestamp: new Date(),
+            };
+            return [...updated, last];
+          }
+
+          last = { ...updated[updated.length - 1] };
+          last.toolCalls = [...(last.toolCalls || []), ...started];
+
+          const parts = [...(last.parts || [])];
+          for (const tc of started) {
+            const exists = parts.some((p) => p.type === "tool_call" && p.toolCall.id === tc.id);
+            if (!exists) {
+              parts.push({ type: "tool_call", toolCall: tc });
+            }
+          }
+
+          last.parts = parts;
+          updated[updated.length - 1] = last;
+          return updated;
+        });
         break;
       }
 
@@ -117,6 +185,38 @@ export function useAgent(url: string): UseAgentReturn {
               : c
           )
         );
+
+        setMessages((prev) => {
+          if (prev.length === 0 || prev[prev.length - 1].role !== "assistant") return prev;
+
+          const updated = [...prev];
+          const last = { ...updated[updated.length - 1] };
+
+          if (last.toolCalls) {
+            last.toolCalls = last.toolCalls.map((c) =>
+              c.id === payload.id ? { ...c, result: payload.result, error: payload.error } : c
+            );
+          }
+
+          if (last.parts) {
+            last.parts = last.parts.map((p) => {
+              if (p.type === "tool_call" && p.toolCall.id === payload.id) {
+                return {
+                  ...p,
+                  toolCall: {
+                    ...p.toolCall,
+                    result: payload.result,
+                    error: payload.error,
+                  },
+                };
+              }
+              return p;
+            });
+          }
+
+          updated[updated.length - 1] = last;
+          return updated;
+        });
         break;
 
       case "tools_discovered":
@@ -134,18 +234,6 @@ export function useAgent(url: string): UseAgentReturn {
         break;
 
       case "complete":
-        // Flush active tool calls into the last assistant message
-        setMessages((prev) => {
-          const currentTools = activeToolCallsRef.current;
-          if (prev.length > 0 && prev[prev.length - 1].role === "assistant" && currentTools.length > 0) {
-            const updated = [...prev];
-            const last = { ...updated[updated.length - 1] };
-            last.toolCalls = [...(last.toolCalls || []), ...currentTools];
-            updated[updated.length - 1] = last;
-            return updated;
-          }
-          return prev;
-        });
         setActiveToolCalls([]);
         setAgentStatus("idle");
         break;

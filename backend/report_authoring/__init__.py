@@ -12,6 +12,12 @@ from .visual_review import (
     decide_visual_qa_iteration,
     review_rendered_report,
 )
+from .desktop import (
+    DesktopHandoffResult,
+    open_report_in_powerbi_desktop,
+    prepare_report_for_desktop,
+)
+from .workspace import DashboardWorkspaceManager, WorkspaceRevisionResult
 
 __all__ = [
     "CompilationResult",
@@ -26,4 +32,9 @@ __all__ = [
     "VisualReview",
     "decide_visual_qa_iteration",
     "review_rendered_report",
+    "DesktopHandoffResult",
+    "open_report_in_powerbi_desktop",
+    "prepare_report_for_desktop",
+    "DashboardWorkspaceManager",
+    "WorkspaceRevisionResult",
 ]

@@ -143,26 +143,65 @@ export function ChatMessageBubble({
           <span className="text-[10px] text-zinc-300 font-mono">{formattedTime}</span>
         </div>
 
-        {/* Reasoning strip — shown for assistant only */}
-        {!isUser && reasoningText && (
-          <ReasoningStrip text={reasoningText} isStreaming={reasoningStreaming} />
-        )}
-
-        {/* Main content */}
-        {displayContent && <MarkdownRenderer content={displayContent} />}
-
-        {/* Typing cursor when streaming response text */}
-        {isStreaming && displayContent && (
-          <span className="inline-block w-0.5 h-3.5 bg-zinc-400 ml-0.5 animate-pulse align-middle" />
-        )}
-
-        {/* Tool calls */}
-        {message.toolCalls && message.toolCalls.length > 0 && (
-          <div className="mt-3 pt-3 border-t border-zinc-100 space-y-2">
-            {message.toolCalls.map((tc) => (
-              <ToolCallCard key={tc.id} toolCall={tc} />
-            ))}
+        {/* Render parts in exact chronological timing order if present */}
+        {!isUser && message.parts && message.parts.length > 0 ? (
+          <div className="space-y-3">
+            {message.parts.map((part, pIdx) => {
+              const isLastPart = pIdx === message.parts!.length - 1;
+              if (part.type === "reasoning") {
+                return (
+                  <ReasoningStrip
+                    key={`reasoning-${pIdx}`}
+                    text={part.text}
+                    isStreaming={isStreaming && isLastPart}
+                  />
+                );
+              }
+              if (part.type === "tool_call") {
+                return (
+                  <div key={part.toolCall.id || `tc-${pIdx}`} className="my-1.5">
+                    <ToolCallCard toolCall={part.toolCall} />
+                  </div>
+                );
+              }
+              if (part.type === "text") {
+                const cleanedText = part.text
+                  .replace(/<thinking>[\s\S]*?<\/thinking>/g, "")
+                  .trim();
+                if (!cleanedText && !isStreaming) return null;
+                return (
+                  <div key={`text-${pIdx}`}>
+                    {cleanedText && <MarkdownRenderer content={cleanedText} />}
+                    {isStreaming && isLastPart && (
+                      <span className="inline-block w-0.5 h-3.5 bg-zinc-400 ml-0.5 animate-pulse align-middle" />
+                    )}
+                  </div>
+                );
+              }
+              return null;
+            })}
           </div>
+        ) : (
+          <>
+            {/* Fallback for legacy assistant messages or User messages */}
+            {!isUser && reasoningText && (
+              <ReasoningStrip text={reasoningText} isStreaming={reasoningStreaming} />
+            )}
+
+            {displayContent && <MarkdownRenderer content={displayContent} />}
+
+            {isStreaming && displayContent && (
+              <span className="inline-block w-0.5 h-3.5 bg-zinc-400 ml-0.5 animate-pulse align-middle" />
+            )}
+
+            {message.toolCalls && message.toolCalls.length > 0 && (
+              <div className="mt-3 pt-3 border-t border-zinc-100 space-y-2">
+                {message.toolCalls.map((tc) => (
+                  <ToolCallCard key={tc.id} toolCall={tc} />
+                ))}
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>

@@ -278,6 +278,131 @@ def preview_pbir_report(project_path: str) -> str:
 
 
 @mcp.tool()
+def prepare_pbir_for_powerbi_desktop(
+    project_path: str,
+    semantic_model_path: str,
+) -> str:
+    """Bind a staged PBIR report to a local PBIP semantic model folder."""
+    from report_authoring.desktop import prepare_report_for_desktop
+
+    result = prepare_report_for_desktop(
+        _allowed_authoring_path(project_path), semantic_model_path
+    )
+    return json.dumps(result.to_dict(), indent=2)
+
+
+@mcp.tool()
+def open_pbir_in_powerbi_desktop(project_path: str) -> str:
+    """Open a validated staged PBIR report in the installed Power BI Desktop app."""
+    from report_authoring.desktop import open_report_in_powerbi_desktop
+
+    opened = open_report_in_powerbi_desktop(_allowed_authoring_path(project_path))
+    return json.dumps({"opened": True, "pbir_path": opened}, indent=2)
+
+
+def _dashboard_manager():
+    from report_authoring.workspace import DashboardWorkspaceManager
+
+    return DashboardWorkspaceManager(AUTHORING_ROOT / ".dashboard-workspaces")
+
+
+@mcp.tool()
+def create_dashboard_workspace(
+    spec: Dict[str, Any],
+    semantic_model_path: str = "",
+    dashboard_id: str = "",
+    catalog: Dict[str, Any] | None = None,
+    reason: str = "Initial dashboard",
+) -> str:
+    """Create a persistent, versioned dashboard and make it active."""
+    from report_authoring.semantic import SemanticModelCatalog
+
+    result = _dashboard_manager().create(
+        DashboardSpec.model_validate(spec),
+        semantic_model_path=semantic_model_path or None,
+        dashboard_id=dashboard_id or None,
+        catalog=SemanticModelCatalog.model_validate(catalog) if catalog else None,
+        reason=reason,
+    )
+    return json.dumps(result.to_dict(), indent=2)
+
+
+@mcp.tool()
+def get_active_dashboard(dashboard_id: str = "") -> str:
+    """Load the active dashboard's canonical spec, build, and version metadata."""
+    return json.dumps(_dashboard_manager().get(dashboard_id or None), indent=2)
+
+
+@mcp.tool()
+def set_active_dashboard(dashboard_id: str) -> str:
+    """Select which persistent dashboard subsequent revision requests target."""
+    return json.dumps(_dashboard_manager().set_active(dashboard_id), indent=2)
+
+
+@mcp.tool()
+def audit_active_dashboard(
+    dashboard_id: str = "",
+    catalog: Dict[str, Any] | None = None,
+) -> str:
+    """Audit the active dashboard before an autonomous revision."""
+    from report_authoring.semantic import SemanticModelCatalog
+
+    result = _dashboard_manager().audit(
+        dashboard_id or None,
+        SemanticModelCatalog.model_validate(catalog) if catalog else None,
+    )
+    return json.dumps(result, indent=2)
+
+
+@mcp.tool()
+def revise_active_dashboard(
+    spec: Dict[str, Any],
+    reason: str,
+    expected_version: int,
+    dashboard_id: str = "",
+    catalog: Dict[str, Any] | None = None,
+) -> str:
+    """Validate and compile a new immutable version of the active dashboard."""
+    from report_authoring.semantic import SemanticModelCatalog
+
+    result = _dashboard_manager().revise(
+        DashboardSpec.model_validate(spec),
+        reason=reason,
+        expected_version=expected_version,
+        dashboard_id=dashboard_id or None,
+        catalog=SemanticModelCatalog.model_validate(catalog) if catalog else None,
+    )
+    return json.dumps(result.to_dict(), indent=2)
+
+
+@mcp.tool()
+def list_dashboard_versions(dashboard_id: str = "") -> str:
+    """List immutable versions for the active or selected dashboard."""
+    return json.dumps(
+        _dashboard_manager().list_versions(dashboard_id or None), indent=2
+    )
+
+
+@mcp.tool()
+def rollback_dashboard(target_version: int, dashboard_id: str = "") -> str:
+    """Restore an earlier dashboard spec as a new auditable version."""
+    result = _dashboard_manager().rollback(target_version, dashboard_id or None)
+    return json.dumps(result.to_dict(), indent=2)
+
+
+@mcp.tool()
+def open_active_dashboard_in_powerbi_desktop(
+    dashboard_id: str = "",
+    semantic_model_path: str = "",
+) -> str:
+    """Open the active dashboard version in Desktop using its saved model link."""
+    result = _dashboard_manager().open_active_in_desktop(
+        dashboard_id or None, semantic_model_path or None
+    )
+    return json.dumps(result, indent=2)
+
+
+@mcp.tool()
 def check_powerbi_cloud_qa_readiness() -> str:
     """Check cloud publishing, PNG rendering, and visual-review configuration."""
     vision_provider = os.getenv("POWERBI_VISION_PROVIDER", os.getenv("LLM_PROVIDER", "gemini")).lower()

@@ -12,7 +12,8 @@ from pydantic import ValidationError
 
 from backend.report_authoring import DashboardSpec, compile_report
 from backend.report_authoring.layout import validate_page_layout
-from backend.report_authoring.pbir import inspect_pbir_project
+from backend.report_authoring.pbir import inspect_pbir_project, validate_pbir_project
+from backend.report_authoring.visual_capabilities import VISUAL_CAPABILITIES
 
 
 def sample_spec() -> DashboardSpec:
@@ -73,6 +74,166 @@ class ReportAuthoringTests(unittest.TestCase):
             self.assertIn("queryState", visual["visual"]["query"])
 
 
+class ExpandedVisualAuthoringTests(unittest.TestCase):
+    @staticmethod
+    def visual_payload(visual_type: str) -> dict:
+        capability = VISUAL_CAPABILITIES[visual_type]
+        fields = {}
+        for role_name, role in capability.roles.items():
+            if role.min_fields:
+                field = (
+                    {"table": "Date", "name": "Month"}
+                    if role.field_kind == "column"
+                    else {"table": "Sales", "name": "Revenue", "kind": "measure"}
+                )
+                fields[role_name] = [field for _ in range(role.min_fields)]
+        if not fields and capability.min_total_fields:
+            role_name, role = next(iter(capability.roles.items()))
+            fields[role_name] = [{"table": "Date", "name": "Month"}]
+        payload = {
+            "type": visual_type,
+            "title": f"Test {visual_type}",
+            "position": {"column": 0, "row": 0, "width": 6, "height": 4},
+            "fields": fields,
+        }
+        if visual_type == "textbox":
+            payload["content"] = "Executive overview"
+        elif visual_type == "basicShape":
+            payload["shape_type"] = "rectangle"
+        elif visual_type == "actionButton":
+            payload["content"] = "Open documentation"
+            payload["action"] = {"type": "webUrl", "target": "https://learn.microsoft.com"}
+        elif visual_type == "image":
+            payload["image_url"] = "https://example.com/logo.png"
+        return payload
+
+    def test_every_registered_visual_compiles(self) -> None:
+        for visual_type in VISUAL_CAPABILITIES:
+            with self.subTest(visual_type=visual_type):
+                spec = DashboardSpec.model_validate({
+                    "title": f"Visual {visual_type}",
+                    "dataset": {"path": "../Sales.SemanticModel"},
+                    "pages": [{
+                        "name": "Overview",
+                        "visuals": [self.visual_payload(visual_type)],
+                    }],
+                })
+                with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as root:
+                    result = compile_report(spec, root)
+                    self.assertTrue(result.validation.valid, result.validation.to_dict())
+
+    def test_registered_visuals_pass_official_pbir_schemas(self) -> None:
+        pages = []
+        for index, visual_type in enumerate(VISUAL_CAPABILITIES):
+            page_index, slot = divmod(index, 4)
+            if page_index == len(pages):
+                pages.append({"name": f"Page {page_index + 1}", "visuals": []})
+            visual = self.visual_payload(visual_type)
+            visual["position"] = {
+                "column": 0 if slot % 2 == 0 else 6,
+                "row": 0 if slot < 2 else 5,
+                "width": 6,
+                "height": 4,
+            }
+            pages[page_index]["visuals"].append(visual)
+        spec = DashboardSpec.model_validate({
+            "title": "Visual Matrix",
+            "dataset": {"path": "../Sales.SemanticModel"},
+            "pages": pages,
+        })
+        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as root:
+            result = compile_report(spec, root)
+            report = validate_pbir_project(
+                result.report_path,
+                official_schemas=True,
+                allow_schema_download=False,
+            )
+            self.assertTrue(report.valid, report.to_dict())
+
+    def test_scatter_uses_visual_specific_query_roles(self) -> None:
+        visual = self.visual_payload("scatterChart")
+        spec = DashboardSpec.model_validate({
+            "title": "Scatter", "dataset": {"path": "../Sales.SemanticModel"},
+            "pages": [{"name": "Overview", "visuals": [visual]}],
+        })
+        self.assertEqual(set(spec.pages[0].visuals[0].resolved_fields()), {"X", "Y"})
+
+    def test_ai_visuals_use_official_sample_roles(self) -> None:
+        decomposition = DashboardSpec.model_validate({
+            "title": "AI", "dataset": {"path": "../Sales.SemanticModel"},
+            "pages": [{"name": "Overview", "visuals": [
+                self.visual_payload("decompositionTreeVisual")
+            ]}],
+        }).pages[0].visuals[0]
+        influencers = DashboardSpec.model_validate({
+            "title": "AI", "dataset": {"path": "../Sales.SemanticModel"},
+            "pages": [{"name": "Overview", "visuals": [
+                self.visual_payload("keyDriversVisual")
+            ]}],
+        }).pages[0].visuals[0]
+        self.assertEqual(set(decomposition.resolved_fields()), {"Analyze", "ExplainBy"})
+        self.assertEqual(set(influencers.resolved_fields()), {"Target", "ExplainBy"})
+
+    def test_page_navigation_button_resolves_page_identifier(self) -> None:
+        button = self.visual_payload("actionButton")
+        button["action"] = {"type": "pageNavigation", "target": "Details"}
+        spec = DashboardSpec.model_validate({
+            "title": "Navigation", "dataset": {"path": "../Sales.SemanticModel"},
+            "pages": [
+                {"name": "Overview", "visuals": [button]},
+                {"name": "Details", "visuals": [self.visual_payload("card")]},
+            ],
+        })
+        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as root:
+            result = compile_report(spec, root)
+            visual_files = Path(result.report_path).glob(
+                "definition/pages/*/visuals/*/visual.json"
+            )
+            button_json = next(
+                item for item in (json.loads(path.read_text()) for path in visual_files)
+                if item["visual"]["visualType"] == "actionButton"
+            )
+            link = button_json["visual"]["visualContainerObjects"]["visualLink"][0]
+            target = link["properties"]["navigationSection"]["expr"]["Literal"]["Value"]
+            self.assertNotEqual(target.strip("'"), "Details")
+
+    def test_trusted_custom_visual_adapter_compiles(self) -> None:
+        visual = {
+            "type": "denebCustomVisual1.0.0",
+            "title": "Custom", "position": {"column": 0, "row": 0, "width": 6, "height": 4},
+            "fields": {"values": [{"table": "Sales", "name": "Revenue", "kind": "measure"}]},
+            "custom_visual": {
+                "source": "appsource", "trusted": True, "installed": True,
+                "roles": {"values": {"query_role": "dataset", "min_fields": 1}},
+            },
+        }
+        spec = DashboardSpec.model_validate({
+            "title": "Custom", "dataset": {"path": "../Sales.SemanticModel"},
+            "pages": [{"name": "Overview", "visuals": [visual]}],
+        })
+        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as root:
+            result = compile_report(spec, root)
+            self.assertTrue(result.validation.valid, result.validation.to_dict())
+
+    def test_rejects_unregistered_custom_visual(self) -> None:
+        visual = self.visual_payload("card")
+        visual["type"] = "unknownVisual"
+        with self.assertRaises(ValidationError):
+            DashboardSpec.model_validate({
+                "title": "Invalid", "dataset": {"path": "../Sales.SemanticModel"},
+                "pages": [{"name": "Overview", "visuals": [visual]}],
+            })
+
+    def test_rejects_unknown_field_role(self) -> None:
+        visual = self.visual_payload("lineChart")
+        visual["fields"]["latitude"] = [{"table": "Geo", "name": "Latitude"}]
+        with self.assertRaises(ValidationError):
+            DashboardSpec.model_validate({
+                "title": "Invalid", "dataset": {"path": "../Sales.SemanticModel"},
+                "pages": [{"name": "Overview", "visuals": [visual]}],
+            })
+
+
 
 
 from backend.report_authoring.preview import build_preview_manifest
@@ -94,6 +255,7 @@ from backend.report_authoring.desktop import (
     prepare_report_for_desktop,
 )
 from backend.report_authoring.workspace import DashboardWorkspaceManager
+from backend.report_authoring.qa import DashboardQARejected, QAPolicy
 
 
 class MilestoneTwoTests(unittest.TestCase):
@@ -249,6 +411,108 @@ class StatefulDashboardWorkspaceTests(unittest.TestCase):
         model.mkdir()
         (model / "definition.pbism").write_text("{}", encoding="utf-8")
         return model
+
+    @staticmethod
+    def _catalog(*, include_fields: bool = True) -> SemanticModelCatalog:
+        return SemanticModelCatalog.model_validate({"tables": [
+            {
+                "name": "Sales",
+                "measures": (
+                    [{"name": "Revenue", "data_type": "currency"}]
+                    if include_fields else []
+                ),
+            },
+            {
+                "name": "Date",
+                "columns": (
+                    [{"name": "Month", "data_type": "string", "distinct_count": 12}]
+                    if include_fields else []
+                ),
+            },
+        ]})
+
+    def test_successful_revision_stores_runtime_qa_evidence(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as root_value:
+            root = Path(root_value)
+            manager = DashboardWorkspaceManager(root / "workspaces")
+            result = manager.create(
+                sample_spec(), str(self._model(root)), catalog=self._catalog()
+            )
+            self.assertTrue(result.qa["promotable"])
+            self.assertIn(result.qa["status"], {"VERIFIED", "VERIFIED_WITH_WARNINGS"})
+            gate_names = {item["name"] for item in result.qa["gates"]}
+            self.assertTrue({
+                "layout", "quality", "semantic", "compile",
+                "pbir_structure", "official_schema", "preview_manifest",
+            }.issubset(gate_names))
+
+    def test_semantic_failure_returns_feedback_and_preserves_active_version(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as root_value:
+            root = Path(root_value)
+            manager = DashboardWorkspaceManager(
+                root / "workspaces",
+                QAPolicy(require_semantic_catalog=True),
+            )
+            manager.create(
+                sample_spec(), str(self._model(root)), catalog=self._catalog()
+            )
+            with self.assertRaises(DashboardQARejected) as raised:
+                manager.revise(
+                    sample_spec(),
+                    "Invalid semantic candidate",
+                    expected_version=1,
+                    catalog=self._catalog(include_fields=False),
+                )
+            report = raised.exception.report
+            self.assertEqual(report.status, "NEEDS_REVISION")
+            self.assertFalse(report.promotable)
+            self.assertTrue(any(
+                item.gate == "semantic" and item.classification.value == "blocking"
+                for item in report.findings
+            ))
+            self.assertTrue(Path(raised.exception.candidate_manifest_path).is_file())
+            self.assertEqual(manager.get()["dashboard"]["active_version"], 1)
+
+    def test_quality_warning_is_feedback_not_a_promotion_blocker(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as root_value:
+            root = Path(root_value)
+            spec = sample_spec().model_copy(deep=True)
+            spec.pages[0].visuals[0].position.width = 1
+            spec.pages[0].visuals[0].position.height = 1
+            manager = DashboardWorkspaceManager(root / "workspaces")
+            result = manager.create(spec, str(self._model(root)))
+            self.assertTrue(result.qa["promotable"])
+            self.assertEqual(result.qa["status"], "VERIFIED_WITH_WARNINGS")
+            self.assertTrue(any(
+                item["code"] == "small_visual"
+                and item["classification"] == "improvement"
+                for item in result.qa["findings"]
+            ))
+
+    def test_identical_failures_stop_at_needs_review(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as root_value:
+            root = Path(root_value)
+            manager = DashboardWorkspaceManager(
+                root / "workspaces",
+                QAPolicy(max_attempts=3, require_semantic_catalog=True),
+            )
+            manager.create(
+                sample_spec(), str(self._model(root)), catalog=self._catalog()
+            )
+            statuses = []
+            for _ in range(3):
+                with self.assertRaises(DashboardQARejected) as raised:
+                    manager.revise(
+                        sample_spec(),
+                        "Repeated invalid candidate",
+                        expected_version=1,
+                        catalog=self._catalog(include_fields=False),
+                    )
+                statuses.append(raised.exception.report.status)
+            self.assertEqual(statuses, [
+                "NEEDS_REVISION", "NEEDS_REVISION", "NEEDS_REVIEW"
+            ])
+            self.assertEqual(manager.get()["dashboard"]["active_version"], 1)
 
     def test_active_dashboard_survives_manager_restart(self) -> None:
         with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as root_value:

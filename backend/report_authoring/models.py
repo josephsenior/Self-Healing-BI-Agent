@@ -4,11 +4,15 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
+from .visual_capabilities import (
+    VISUAL_CAPABILITIES,
+    RoleCapability,
+    VisualCapability,
+)
+
 Name = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=160)]
-VisualType = Literal[
-    "barChart", "clusteredColumnChart", "lineChart", "donutChart",
-    "card", "tableEx", "slicer",
-]
+Content = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=10000)]
+VisualType = Name
 
 
 class FieldRef(BaseModel):
@@ -20,6 +24,42 @@ class FieldRef(BaseModel):
     @property
     def query_ref(self) -> str:
         return f"{self.table}.{self.name}"
+
+
+class ButtonAction(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    action_type: Literal["webUrl", "pageNavigation"] = Field(alias="type")
+    target: Content
+    tooltip: Name | None = None
+
+    @model_validator(mode="after")
+    def validate_target(self) -> "ButtonAction":
+        if self.action_type == "webUrl" and not self.target.startswith("https://"):
+            raise ValueError("button webUrl targets must use https")
+        return self
+
+
+class CustomRoleDefinition(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    query_role: Name
+    min_fields: int = Field(default=0, ge=0, le=20)
+    max_fields: int = Field(default=20, ge=1, le=20)
+    field_kind: Literal["column", "measure", "any"] = "any"
+
+    @model_validator(mode="after")
+    def valid_range(self) -> "CustomRoleDefinition":
+        if self.min_fields > self.max_fields:
+            raise ValueError("min_fields cannot exceed max_fields")
+        return self
+
+
+class CustomVisualDefinition(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    source: Literal["appsource", "organizational", "private"]
+    trusted: Literal[True]
+    installed: Literal[True]
+    roles: dict[Name, CustomRoleDefinition]
+    min_total_fields: int = Field(default=1, ge=0, le=20)
 
 
 class GridPosition(BaseModel):
@@ -44,27 +84,127 @@ class VisualSpec(BaseModel):
     category: FieldRef | None = None
     values: list[FieldRef] = Field(default_factory=list, max_length=20)
     series: FieldRef | None = None
+    fields: dict[Name, list[FieldRef]] = Field(default_factory=dict)
+    content: Content | None = None
+    font_size: int = Field(default=12, ge=6, le=72)
+    font_color: str = "#000000"
+    text_alignment: Literal["left", "center", "right"] = "left"
+    shape_type: Literal["rectangle", "roundedRectangle", "oval", "line", "arrow"] | None = None
+    image_url: str | None = None
+    action: ButtonAction | None = None
+    custom_visual: CustomVisualDefinition | None = None
+
+    def capability(self) -> VisualCapability:
+        builtin = VISUAL_CAPABILITIES.get(self.visual_type)
+        if builtin is not None:
+            if self.custom_visual is not None:
+                raise ValueError("custom_visual cannot override a built-in visual type")
+            return builtin
+        if self.custom_visual is None:
+            raise ValueError(
+                f"unsupported visual type {self.visual_type!r}; provide a trusted custom_visual adapter"
+            )
+        roles = {
+            name: RoleCapability(
+                item.query_role,
+                item.min_fields,
+                item.max_fields,
+                item.field_kind,
+            )
+            for name, item in self.custom_visual.roles.items()
+        }
+        return VisualCapability(
+            self.visual_type,
+            "custom",
+            roles,
+            self.custom_visual.min_total_fields,
+        )
+
+    def resolved_fields(self) -> dict[str, list[FieldRef]]:
+        """Return PBIR query-role names mapped to their field projections."""
+        capability = self.capability()
+        logical = {role: list(items) for role, items in self.fields.items()}
+        legacy = (
+            (capability.legacy_category_role, [self.category] if self.category else []),
+            (capability.legacy_values_role, self.values),
+            (capability.legacy_series_role, [self.series] if self.series else []),
+        )
+        for role_name, items in legacy:
+            if not role_name or not items:
+                continue
+            if role_name in logical:
+                raise ValueError(
+                    f"role {role_name!r} is provided by both fields and a legacy field"
+                )
+            logical[role_name] = list(items)
+        return {
+            capability.roles[role_name].query_role: items
+            for role_name, items in logical.items()
+            if items
+        }
+
+    def fields_for_role(self, role_name: str) -> list[FieldRef]:
+        capability = self.capability()
+        return self.resolved_fields().get(capability.roles[role_name].query_role, [])
 
     @model_validator(mode="after")
     def validate_roles(self) -> "VisualSpec":
-        category_types = {
-            "barChart", "clusteredColumnChart", "lineChart", "donutChart"
-        }
-        if self.visual_type in category_types and self.category is None:
-            raise ValueError(f"{self.visual_type} requires a category field")
-        if self.visual_type in category_types | {"card", "tableEx"} and not self.values:
-            raise ValueError(f"{self.visual_type} requires at least one value")
-        if self.visual_type == "card" and len(self.values) != 1:
-            raise ValueError("card requires exactly one value")
-        if self.visual_type == "slicer":
-            if self.category is None:
-                raise ValueError("slicer requires a category field")
-            if self.values or self.series:
-                raise ValueError("slicer only accepts a category field")
-        if self.series and self.visual_type not in {
-            "barChart", "clusteredColumnChart", "lineChart"
-        }:
-            raise ValueError(f"{self.visual_type} does not support a series field")
+        capability = self.capability()
+        unknown = set(self.fields) - set(capability.roles)
+        if unknown:
+            raise ValueError(
+                f"{self.visual_type} does not support field roles: "
+                + ", ".join(sorted(unknown))
+            )
+        resolved = self.resolved_fields()
+        if sum(len(items) for items in resolved.values()) < capability.min_total_fields:
+            raise ValueError(f"{self.visual_type} requires at least one field")
+        for role_name, role in capability.roles.items():
+            items = resolved.get(role.query_role, [])
+            if len(items) < role.min_fields:
+                raise ValueError(
+                    f"{self.visual_type} role {role_name!r} requires at least "
+                    f"{role.min_fields} field(s)"
+                )
+            if len(items) > role.max_fields:
+                raise ValueError(
+                    f"{self.visual_type} role {role_name!r} accepts at most "
+                    f"{role.max_fields} field(s)"
+                )
+            if role.field_kind != "any" and any(
+                item.kind != role.field_kind for item in items
+            ):
+                raise ValueError(
+                    f"{self.visual_type} role {role_name!r} requires {role.field_kind}s"
+                )
+        if self.visual_type == "azureMap":
+            has_latitude = bool(self.fields_for_role("latitude"))
+            has_longitude = bool(self.fields_for_role("longitude"))
+            if has_latitude != has_longitude:
+                raise ValueError("azureMap latitude and longitude must be provided together")
+        if self.visual_type == "textbox" and self.content is None:
+            raise ValueError("textbox requires content")
+        if self.visual_type == "basicShape" and self.shape_type is None:
+            raise ValueError("basicShape requires shape_type")
+        if self.visual_type == "actionButton" and self.action is None:
+            raise ValueError("actionButton requires an action")
+        if self.visual_type == "image":
+            if not self.image_url and not self.fields_for_role("image"):
+                raise ValueError("image requires image_url or an image field")
+            if self.image_url and not self.image_url.startswith("https://"):
+                raise ValueError("image_url must use https")
+        canvas_types = {"textbox", "basicShape", "actionButton", "image"}
+        if self.visual_type not in canvas_types and any(
+            item is not None
+            for item in (self.content, self.shape_type, self.image_url, self.action)
+        ):
+            raise ValueError("canvas content properties require a canvas visual type")
+        if len(self.font_color) != 7 or not self.font_color.startswith("#"):
+            raise ValueError("font_color must be a #RRGGBB color")
+        try:
+            int(self.font_color[1:], 16)
+        except ValueError as exc:
+            raise ValueError("font_color must be a #RRGGBB color") from exc
         return self
 
 
@@ -114,4 +254,15 @@ class DashboardSpec(BaseModel):
         names = [page.name.casefold() for page in self.pages]
         if len(names) != len(set(names)):
             raise ValueError("page names must be unique")
+        page_names = {page.name.casefold() for page in self.pages}
+        for page in self.pages:
+            for visual in page.visuals:
+                if (
+                    visual.action
+                    and visual.action.action_type == "pageNavigation"
+                    and visual.action.target.casefold() not in page_names
+                ):
+                    raise ValueError(
+                        f"button target page {visual.action.target!r} does not exist"
+                    )
         return self

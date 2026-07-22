@@ -4,6 +4,7 @@ import json
 import os
 import re
 import threading
+import uuid
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -14,7 +15,18 @@ from .desktop import open_report_in_powerbi_desktop, prepare_report_for_desktop
 from .layout import validate_page_layout
 from .models import DashboardSpec
 from .preview import build_preview_manifest
+from .qa import (
+    DashboardQARejected,
+    FindingClass,
+    GateStatus,
+    QAFinding,
+    QAGateResult,
+    QAPolicy,
+    QAReport,
+    build_report,
+)
 from .quality import evaluate_report_quality
+from .pbir import validate_pbir_project
 from .semantic import SemanticModelCatalog, validate_dashboard_semantics
 
 
@@ -50,6 +62,7 @@ class WorkspaceRevisionResult:
     semantic_issues: list[dict[str, Any]]
     validation: dict[str, Any]
     preview: dict[str, Any]
+    qa: dict[str, Any]
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -58,10 +71,11 @@ class WorkspaceRevisionResult:
 class DashboardWorkspaceManager:
     """Persistent, versioned source-of-truth for autonomous dashboards."""
 
-    def __init__(self, root: str | Path):
+    def __init__(self, root: str | Path, qa_policy: QAPolicy | None = None):
         self.root = Path(root).resolve()
         self.root.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
+        self.qa_policy = qa_policy or QAPolicy.from_env()
 
     @property
     def index_path(self) -> Path:
@@ -123,6 +137,104 @@ class DashboardWorkspaceManager:
             _write_json_atomic(self.index_path, index)
             return index
 
+    def _qa_attempt_path(self, dashboard_id: str) -> Path:
+        return self._dashboard_root(dashboard_id) / "qa-attempts.json"
+
+    def _register_qa_attempt(
+        self,
+        dashboard_id: str,
+        base_version: int,
+        report: QAReport,
+        candidate_report_path: str | None,
+    ) -> QAReport:
+        path = self._qa_attempt_path(dashboard_id)
+        state = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+        key = str(base_version)
+        previous = state.get(key, {})
+        previous_attempt = int(previous.get("attempt", 0))
+        previous_fingerprint = previous.get("fingerprint")
+
+        # A materially different candidate starts a fresh cycle after a bounded
+        # run has already reached NEEDS_REVIEW.
+        if previous_attempt >= self.qa_policy.max_attempts and (
+            previous_fingerprint != report.fingerprint
+        ):
+            previous = {}
+            previous_attempt = 0
+            previous_fingerprint = None
+
+        attempt = previous_attempt + 1
+        stalled = (
+            int(previous.get("stalled_iterations", 0)) + 1
+            if previous_fingerprint == report.fingerprint
+            else 0
+        )
+        previous_best = int(previous.get("best_score", 10**9))
+        is_best = report.score < previous_best
+        best_score = min(previous_best, report.score)
+        best_path = (
+            candidate_report_path
+            if is_best
+            else previous.get("best_candidate_report_path")
+        )
+
+        if report.promotable:
+            status = report.status
+        elif attempt >= self.qa_policy.max_attempts or stalled >= 2:
+            status = "NEEDS_REVIEW"
+        else:
+            status = "NEEDS_REVISION"
+
+        updated = report.with_attempt(
+            attempt=attempt,
+            status=status,
+            best_candidate_report_path=best_path,
+        )
+        state[key] = {
+            "attempt": attempt,
+            "fingerprint": report.fingerprint,
+            "stalled_iterations": stalled,
+            "best_score": best_score,
+            "best_candidate_report_path": best_path,
+            "status": status,
+            "updated_at": _utc_now(),
+        }
+        _write_json_atomic(path, state)
+        return updated
+
+    def _clear_qa_attempt(self, dashboard_id: str, base_version: int) -> None:
+        path = self._qa_attempt_path(dashboard_id)
+        if not path.is_file():
+            return
+        state = json.loads(path.read_text(encoding="utf-8"))
+        state.pop(str(base_version), None)
+        _write_json_atomic(path, state)
+
+    def _write_candidate_manifest(
+        self,
+        dashboard_id: str,
+        base_version: int,
+        reason: str,
+        spec: DashboardSpec,
+        report_path: str | None,
+        qa: QAReport,
+    ) -> Path:
+        path = (
+            self._dashboard_root(dashboard_id)
+            / "qa-candidates"
+            / f"{uuid.uuid4().hex}.json"
+        )
+        _write_json_atomic(path, {
+            "dashboard_id": dashboard_id,
+            "base_version": base_version,
+            "reason": reason,
+            "created_at": _utc_now(),
+            "spec": spec.model_dump(by_alias=True),
+            "report_path": report_path,
+            "qa": qa.to_dict(),
+        })
+        return path
+
     def _build_revision(
         self,
         dashboard_id: str,
@@ -133,34 +245,304 @@ class DashboardWorkspaceManager:
         semantic_model_path: str | None,
         catalog: SemanticModelCatalog | None,
     ) -> WorkspaceRevisionResult:
+        findings: list[QAFinding] = []
+        gates: list[QAGateResult] = []
+
         layout_errors = [
-            f"{page.name}: {issue}"
+            (page.name, issue)
             for page in spec.pages
             for issue in validate_page_layout(page)
         ]
-        if layout_errors:
-            raise ValueError("invalid report layout: " + "; ".join(layout_errors))
-        quality = [item.to_dict() for item in evaluate_report_quality(spec)]
-        semantic = (
-            [item.to_dict() for item in validate_dashboard_semantics(spec, catalog)]
-            if catalog
-            else []
-        )
-        semantic_errors = [item for item in semantic if item["severity"] == "error"]
-        if semantic_errors:
-            raise ValueError(f"semantic validation failed: {semantic_errors}")
+        layout_findings = [
+            QAFinding(
+                FindingClass.BLOCKING,
+                "layout",
+                "invalid_layout",
+                message,
+                page=page,
+            )
+            for page, message in layout_errors
+        ]
+        findings.extend(layout_findings)
+        gates.append(QAGateResult(
+            "layout",
+            GateStatus.FAILED if layout_findings else GateStatus.PASSED,
+            len(layout_findings),
+        ))
+
+        quality_items = evaluate_report_quality(spec)
+        quality = [item.to_dict() for item in quality_items]
+        quality_findings: list[QAFinding] = []
+        for item in quality_items:
+            if item.code in self.qa_policy.blocking_quality_codes:
+                classification = FindingClass.BLOCKING
+            elif item.severity == "warning":
+                classification = FindingClass.IMPROVEMENT
+            else:
+                classification = FindingClass.INFORMATIONAL
+            quality_findings.append(QAFinding(
+                classification,
+                "quality",
+                item.code,
+                item.message,
+                page=item.page,
+                visual=item.visual,
+            ))
+        findings.extend(quality_findings)
+        gates.append(QAGateResult(
+            "quality",
+            GateStatus.FAILED
+            if any(
+                item.classification == FindingClass.BLOCKING
+                for item in quality_findings
+            )
+            else GateStatus.PASSED_WITH_FINDINGS
+            if quality_findings
+            else GateStatus.PASSED,
+            len(quality_findings),
+        ))
+
+        semantic: list[dict[str, Any]] = []
+        semantic_findings: list[QAFinding] = []
+        if catalog is not None:
+            semantic_items = validate_dashboard_semantics(spec, catalog)
+            semantic = [item.to_dict() for item in semantic_items]
+            for item in semantic_items:
+                semantic_findings.append(QAFinding(
+                    FindingClass.BLOCKING
+                    if item.severity == "error"
+                    else FindingClass.IMPROVEMENT,
+                    "semantic",
+                    item.code,
+                    item.message,
+                    page=item.page,
+                    visual=item.visual,
+                    field=item.field,
+                ))
+            findings.extend(semantic_findings)
+            gates.append(QAGateResult(
+                "semantic",
+                GateStatus.FAILED
+                if any(
+                    item.classification == FindingClass.BLOCKING
+                    for item in semantic_findings
+                )
+                else GateStatus.PASSED_WITH_FINDINGS
+                if semantic_findings
+                else GateStatus.PASSED,
+                len(semantic_findings),
+            ))
+        elif self.qa_policy.require_semantic_catalog:
+            missing_catalog = QAFinding(
+                FindingClass.BLOCKING,
+                "semantic",
+                "semantic_catalog_required",
+                "strict QA requires a live SemanticModelCatalog",
+            )
+            findings.append(missing_catalog)
+            gates.append(QAGateResult(
+                "semantic", GateStatus.UNAVAILABLE, 1, missing_catalog.message
+            ))
+        else:
+            gates.append(QAGateResult(
+                "semantic",
+                GateStatus.SKIPPED,
+                detail="not configured: no catalog supplied",
+            ))
 
         dashboard_root = self._dashboard_root(dashboard_id)
-        build: CompilationResult = compile_report(spec, dashboard_root / "builds")
-        report_path = build.report_path
-        pbir_path = str(Path(report_path) / "definition.pbir")
-        if semantic_model_path:
-            handoff = prepare_report_for_desktop(report_path, semantic_model_path)
-            pbir_path = handoff.pbir_path
-            semantic_model_path = handoff.semantic_model_path
+        build: CompilationResult | None = None
+        report_path: str | None = None
+        pbir_path: str | None = None
+        try:
+            build = compile_report(spec, dashboard_root / "candidate-builds")
+            report_path = build.report_path
+            pbir_path = str(Path(report_path) / "definition.pbir")
+            gates.append(QAGateResult("compile", GateStatus.PASSED))
+        except Exception as exc:
+            findings.append(QAFinding(
+                FindingClass.BLOCKING,
+                "compile",
+                "compilation_failed",
+                str(exc),
+            ))
+            gates.append(QAGateResult("compile", GateStatus.FAILED, 1, str(exc)))
+
+        if build is not None and semantic_model_path:
+            try:
+                handoff = prepare_report_for_desktop(report_path, semantic_model_path)
+                pbir_path = handoff.pbir_path
+                semantic_model_path = handoff.semantic_model_path
+                gates.append(QAGateResult("desktop_binding", GateStatus.PASSED))
+            except Exception as exc:
+                findings.append(QAFinding(
+                    FindingClass.BLOCKING,
+                    "desktop_binding",
+                    "desktop_binding_failed",
+                    str(exc),
+                ))
+                gates.append(QAGateResult(
+                    "desktop_binding", GateStatus.FAILED, 1, str(exc)
+                ))
+        elif build is not None:
+            gates.append(QAGateResult(
+                "desktop_binding",
+                GateStatus.SKIPPED,
+                detail="not configured: no local semantic-model path",
+            ))
+        else:
+            gates.append(QAGateResult(
+                "desktop_binding", GateStatus.BLOCKED, detail="compile failed"
+            ))
+
+        structural_validation = None
+        final_validation = build.validation if build is not None else None
+        if report_path is not None:
+            structural_validation = validate_pbir_project(report_path)
+            final_validation = structural_validation
+            structural_findings = [
+                QAFinding(
+                    FindingClass.BLOCKING
+                    if item.severity == "error"
+                    else FindingClass.IMPROVEMENT,
+                    "pbir_structure",
+                    item.code,
+                    item.message,
+                    path=item.path,
+                )
+                for item in structural_validation.issues
+            ]
+            findings.extend(structural_findings)
+            gates.append(QAGateResult(
+                "pbir_structure",
+                GateStatus.FAILED
+                if not structural_validation.valid
+                else GateStatus.PASSED_WITH_FINDINGS
+                if structural_findings
+                else GateStatus.PASSED,
+                len(structural_findings),
+            ))
+        else:
+            gates.append(QAGateResult(
+                "pbir_structure", GateStatus.BLOCKED, detail="compile failed"
+            ))
+
+        if not self.qa_policy.validate_official_schemas:
+            gates.append(QAGateResult(
+                "official_schema",
+                GateStatus.SKIPPED,
+                detail="disabled by QA policy",
+            ))
+        elif report_path is None or structural_validation is None:
+            gates.append(QAGateResult(
+                "official_schema", GateStatus.BLOCKED, detail="compile failed"
+            ))
+        elif not structural_validation.valid:
+            gates.append(QAGateResult(
+                "official_schema",
+                GateStatus.BLOCKED,
+                detail="structural validation failed",
+            ))
+        else:
+            try:
+                official = validate_pbir_project(
+                    report_path,
+                    official_schemas=True,
+                    allow_schema_download=self.qa_policy.allow_schema_download,
+                    schema_cache=Path(__file__).resolve().parents[2]
+                    / ".pbir-schema-cache",
+                )
+                final_validation = official
+                structural_keys = {
+                    (item.code, item.message, item.path)
+                    for item in structural_validation.issues
+                }
+                official_items = [
+                    item
+                    for item in official.issues
+                    if (item.code, item.message, item.path) not in structural_keys
+                ]
+                official_findings = [
+                    QAFinding(
+                        FindingClass.BLOCKING
+                        if item.severity == "error"
+                        else FindingClass.IMPROVEMENT,
+                        "official_schema",
+                        item.code,
+                        item.message,
+                        path=item.path,
+                    )
+                    for item in official_items
+                ]
+                findings.extend(official_findings)
+                gates.append(QAGateResult(
+                    "official_schema",
+                    GateStatus.FAILED
+                    if not official.valid
+                    else GateStatus.PASSED_WITH_FINDINGS
+                    if official_findings
+                    else GateStatus.PASSED,
+                    len(official_findings),
+                ))
+            except Exception as exc:
+                findings.append(QAFinding(
+                    FindingClass.BLOCKING,
+                    "official_schema",
+                    "official_schema_unavailable",
+                    str(exc),
+                ))
+                gates.append(QAGateResult(
+                    "official_schema", GateStatus.UNAVAILABLE, 1, str(exc)
+                ))
+
+        preview: dict[str, Any] = {}
+        if report_path is not None:
+            try:
+                preview = build_preview_manifest(report_path)
+                gates.append(QAGateResult("preview_manifest", GateStatus.PASSED))
+            except Exception as exc:
+                findings.append(QAFinding(
+                    FindingClass.BLOCKING,
+                    "preview_manifest",
+                    "preview_manifest_failed",
+                    str(exc),
+                ))
+                gates.append(QAGateResult(
+                    "preview_manifest", GateStatus.FAILED, 1, str(exc)
+                ))
+        else:
+            gates.append(QAGateResult(
+                "preview_manifest", GateStatus.BLOCKED, detail="compile failed"
+            ))
+
+        qa = build_report(
+            gates,
+            findings,
+            max_attempts=self.qa_policy.max_attempts,
+        )
+        base_version = previous_version or 0
+        qa = self._register_qa_attempt(
+            dashboard_id, base_version, qa, report_path
+        )
+        candidate_manifest = self._write_candidate_manifest(
+            dashboard_id,
+            base_version,
+            reason,
+            spec,
+            report_path,
+            qa,
+        )
+        if not qa.promotable:
+            raise DashboardQARejected(qa, str(candidate_manifest))
+        if build is None or report_path is None or pbir_path is None:
+            raise RuntimeError("promotable QA result has no compiled report")
 
         version_path = self._version_path(dashboard_id, version)
-        preview = build_preview_manifest(report_path)
+        validation = (
+            final_validation.to_dict()
+            if final_validation is not None
+            else build.validation.to_dict()
+        )
         payload = {
             "dashboard_id": dashboard_id,
             "version": version,
@@ -174,10 +556,13 @@ class DashboardWorkspaceManager:
             "semantic_model_path": semantic_model_path,
             "quality_issues": quality,
             "semantic_issues": semantic,
-            "validation": build.validation.to_dict(),
+            "validation": validation,
             "preview": preview,
+            "qa": qa.to_dict(),
+            "qa_candidate_manifest_path": str(candidate_manifest),
         }
         _write_json_atomic(version_path, payload)
+        self._clear_qa_attempt(dashboard_id, base_version)
         return WorkspaceRevisionResult(
             dashboard_id=dashboard_id,
             version=version,
@@ -189,8 +574,9 @@ class DashboardWorkspaceManager:
             semantic_model_path=semantic_model_path,
             quality_issues=quality,
             semantic_issues=semantic,
-            validation=build.validation.to_dict(),
+            validation=validation,
             preview=preview,
+            qa=qa.to_dict(),
         )
 
     def create(
@@ -314,6 +700,7 @@ class DashboardWorkspaceManager:
         self,
         target_version: int,
         dashboard_id: str | None = None,
+        catalog: SemanticModelCatalog | None = None,
     ) -> WorkspaceRevisionResult:
         selected_id = dashboard_id or self.active_dashboard_id()
         state = self.get(selected_id)
@@ -324,6 +711,7 @@ class DashboardWorkspaceManager:
             reason=f"Rollback to version {target_version}",
             expected_version=int(state["dashboard"]["active_version"]),
             dashboard_id=selected_id,
+            catalog=catalog,
         )
 
     def open_active_in_desktop(

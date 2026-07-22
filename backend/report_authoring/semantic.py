@@ -62,12 +62,11 @@ def validate_dashboard_semantics(
     issues: list[SemanticIssue] = []
     for page in spec.pages:
         for visual in page.visuals:
-            roles: list[tuple[str, FieldRef]] = []
-            if visual.category:
-                roles.append(("category", visual.category))
-            if visual.series:
-                roles.append(("series", visual.series))
-            roles.extend(("value", field) for field in visual.values)
+            roles = [
+                (role, field)
+                for role, fields in visual.resolved_fields().items()
+                for field in fields
+            ]
 
             for role, field in roles:
                 address = field.query_ref
@@ -90,13 +89,12 @@ def validate_dashboard_semantics(
                         "warning", "hidden_field", f"{address!r} is hidden",
                         page.name, visual.title, address,
                     ))
-                if role in {"category", "series"} and field.kind != "column":
-                    issues.append(SemanticIssue(
-                        "error", "invalid_role",
-                        f"{role} requires a column, not a measure",
-                        page.name, visual.title, address,
-                    ))
-                if role == "category" and metadata.distinct_count is not None:
+                categorical_roles = {
+                    "Category", "Series", "Group", "Details", "Rows", "Columns",
+                    "TrendAxis", "Play", "SmallMultiples", "Breakdown", "Location",
+                    "Legend", "ExplainBy", "ExpandBy",
+                }
+                if role in categorical_roles and metadata.distinct_count is not None:
                     limit = 30 if visual.visual_type != "slicer" else 200
                     if metadata.distinct_count > limit:
                         issues.append(SemanticIssue(
@@ -104,7 +102,12 @@ def validate_dashboard_semantics(
                             f"{address!r} has {metadata.distinct_count} distinct values",
                             page.name, visual.title, address,
                         ))
-                if role == "value" and field.kind == "column":
+                numeric_roles = {
+                    "Y", "Y2", "X", "Size", "Values", "Data", "Indicator",
+                    "Goal", "MinValue", "MaxValue", "TargetValue", "Gradient",
+                    "Value", "Analyze",
+                }
+                if role in numeric_roles and field.kind == "column":
                     numeric = {"int64", "integer", "double", "decimal", "currency", "number"}
                     if metadata.data_type.casefold() not in numeric:
                         issues.append(SemanticIssue(

@@ -4,6 +4,7 @@ import { Check, Copy } from "lucide-react";
 
 interface MarkdownRendererProps {
   content: string;
+  isStreaming?: boolean;
 }
 
 // ─── Streaming-safe markdown parser ──────────────────────────────────────────
@@ -305,13 +306,16 @@ function TextPart({ text }: { text: string }) {
 
 // ─── Mermaid Render Block ──────────────────────────────────────────────────────
 
-function MermaidBlock({ code }: { code: string }) {
+function MermaidBlock({ code, isStreaming }: { code: string; isStreaming: boolean }) {
   const [svg, setSvg] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (isStreaming || !code.trim()) return;
+
     let isMounted = true;
     const renderDiagram = async () => {
+      let id = "";
       try {
         const { default: mermaid } = await import("mermaid");
         mermaid.initialize({
@@ -320,13 +324,19 @@ function MermaidBlock({ code }: { code: string }) {
           securityLevel: "loose",
         });
         
-        const id = `mermaid-${Math.floor(Math.random() * 100000)}`;
+        id = `mermaid-${crypto.randomUUID()}`;
         const { svg: renderedSvg } = await mermaid.render(id, code);
         if (isMounted) {
           setSvg(renderedSvg);
           setError(null);
         }
       } catch (err: any) {
+        // Mermaid inserts temporary parse-error nodes into document.body.
+        // Remove them so invalid streamed diagrams cannot accumulate banners.
+        if (id) {
+          document.getElementById(id)?.remove();
+          document.getElementById(`d${id}`)?.remove();
+        }
         console.error("Mermaid parsing error:", err);
         if (isMounted) {
           setError(err.message || "Failed to parse Mermaid diagram");
@@ -338,7 +348,15 @@ function MermaidBlock({ code }: { code: string }) {
     return () => {
       isMounted = false;
     };
-  }, [code]);
+  }, [code, isStreaming]);
+
+  if (isStreaming) {
+    return (
+      <div className="my-3 p-4 rounded-xl border border-zinc-800 bg-zinc-900/20 text-zinc-500 text-xs text-center font-sans">
+        Waiting for diagram to finish...
+      </div>
+    );
+  }
 
   if (error) {
     return (
@@ -368,7 +386,7 @@ function MermaidBlock({ code }: { code: string }) {
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
-export function MarkdownRenderer({ content }: MarkdownRendererProps) {
+export function MarkdownRenderer({ content, isStreaming = false }: MarkdownRendererProps) {
   if (!content) return null;
   const parts = parseMarkdown(content);
 
@@ -377,7 +395,7 @@ export function MarkdownRenderer({ content }: MarkdownRendererProps) {
       {parts.map((part, i) =>
         part.type === "code" ? (
           part.language === "mermaid" ? (
-            <MermaidBlock key={i} code={part.content} />
+            <MermaidBlock key={i} code={part.content} isStreaming={isStreaming} />
           ) : (
             <CodeBlock key={i} language={part.language} code={part.content} />
           )

@@ -38,7 +38,7 @@ class AgentConfig(BaseSettings):
     stdio_command: str = Field(default="npx", alias="POWERBI_STDIO_COMMAND")
     stdio_args: list[str] = ["-y", "@microsoft/powerbi-modeling-mcp", "--start"]
     llm_provider: str = Field(default="gemini", alias="LLM_PROVIDER")
-    llm_model: str = Field(default="gemini-3.5-flash", alias="LLM_MODEL")
+    llm_model: str = Field(default="gemini-3.6-flash", alias="LLM_MODEL")
     openai_api_key: str = Field(default="", alias="OPENAI_API_KEY")
     anthropic_api_key: str = Field(default="", alias="ANTHROPIC_API_KEY")
     gemini_api_key: str = Field(default="", alias="GEMINI_API_KEY")
@@ -59,7 +59,9 @@ Your capabilities include:
 - Creating and modifying measures, calculated columns, and tables
 - Evaluating and applying modeling best practices
 
-**Report Authoring Rule**: When asked to create a dashboard, first clarify internally whether the user means a PBIR report page or a Power BI Service dashboard. For report authoring, inspect the semantic model and construct a SemanticModelCatalog from the live metadata. Construct a strict DashboardSpec, run the validation gates, then use create_dashboard_workspace so the canonical spec, semantic-model path, build, and history persist. If and only if the user explicitly requests to open or preview the report locally in Power BI Desktop, call open_active_dashboard_in_powerbi_desktop. When cloud QA is configured and the user authorizes publication, continue with publish_pbir_to_fabric, render_powerbi_report, review_powerbi_render, and decide_powerbi_visual_qa_iteration. Never generate PBIR with run_python_sandbox and never claim a report was deployed or visually approved unless the corresponding tool result confirms it.
+**Report Authoring Rule**: When asked to create a dashboard, first clarify internally whether the user means a PBIR report page or a Power BI Service dashboard. For report authoring, inspect the semantic model and construct a SemanticModelCatalog from the live metadata. Submit the strict DashboardSpec through create_dashboard_workspace; creation, revision, and rollback automatically run the runtime QA admission controller. If a workspace tool returns `accepted: false` with `NEEDS_REVISION`, correct the blocking findings and retry with the complete spec. If it returns `NEEDS_REVIEW`, stop automatic retries and explain the remaining evidence. Only describe a version as verified when the tool returns `accepted: true` with `VERIFIED` or `VERIFIED_WITH_WARNINGS`. If and only if the user explicitly requests to open or preview the report locally in Power BI Desktop, call open_active_dashboard_in_powerbi_desktop. When cloud QA is configured and the user authorizes publication, continue with publish_pbir_to_fabric, render_powerbi_report, review_powerbi_render, and decide_powerbi_visual_qa_iteration. Never generate PBIR with run_python_sandbox and never claim a report was deployed or visually approved unless the corresponding tool result confirms it.
+
+**Visual Selection Rule**: Before constructing or revising a DashboardSpec, call list_powerbi_visual_capabilities and use a listed visual type with its documented field roles and configuration. Prefer the generic `fields` map for new visuals; `category`, `values`, and `series` exist for compatibility with older specs. An unlisted custom visual is allowed only when the spec includes an inline `custom_visual` adapter that declares its exact data roles and confirms the visual is trusted and already installed. Never download or install a custom visual while authoring a report.
 
 **Stateful Dashboard Revision Rule**: When the user refers to the current, existing, generated, or active dashboard, do not ask them to restate its specification or the mechanical workflow. Call get_active_dashboard and audit_active_dashboard, inspect the current semantic model when useful, decide the changes needed from the user's outcome and the audit, and call revise_active_dashboard with the full revised DashboardSpec and the current version as expected_version. Preserve unrelated content, explain the revision reason, never edit generated PBIR directly, and never overwrite history. Do NOT call open_active_dashboard_in_powerbi_desktop automatically after revising or modifying a report; only call open_active_dashboard_in_powerbi_desktop if the user explicitly asks to open or view the report in Power BI Desktop. Use list_dashboard_versions or rollback_dashboard when the user asks to compare or undo changes. Ask for a semantic-model path only when no saved path exists.
 
@@ -557,20 +559,19 @@ async def run_agent_loop(
             # Reset tool call holders
             gemini_tool_calls = []
 
-            # Determine thinking budget and config based on requested reasoning effort level
-            thinking_budget = 1024
-            if reasoning_effort == "low":
-                thinking_budget = 1024
-            elif reasoning_effort == "medium":
-                thinking_budget = 2048
-            elif reasoning_effort == "high":
-                thinking_budget = 4096
-
+            # Gemini 3.6+ uses qualitative thinking levels; token budgets are deprecated.
             thinking_config = None
             if reasoning_effort != "off":
+                thinking_levels = {
+                    "low": genai_types.ThinkingLevel.LOW,
+                    "medium": genai_types.ThinkingLevel.MEDIUM,
+                    "high": genai_types.ThinkingLevel.HIGH,
+                }
                 thinking_config = genai_types.ThinkingConfig(
                     include_thoughts=True,
-                    thinking_budget=thinking_budget
+                    thinking_level=thinking_levels.get(
+                        reasoning_effort, genai_types.ThinkingLevel.MEDIUM
+                    ),
                 )
 
             # We pass dynamic_system_prompt in GenerateContentConfig system_instruction

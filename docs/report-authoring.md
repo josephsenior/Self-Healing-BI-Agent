@@ -14,21 +14,38 @@ visual QA; feedback is applied to `DashboardSpec` and recompiled.
 
 ## Supported visuals
 
-The first compiler supports card, barChart, clusteredColumnChart, lineChart,
-donutChart, tableEx, and slicer. Specifications use a 12-column grid which is
-converted into deterministic PBIR pixel positions.
+The compiler supports 34 built-in visual types across bar/column, line/area,
+combo, part-to-whole, waterfall, ribbon, scatter, table/matrix, card,
+indicator, slicer, map, AI, and canvas-element families. This includes Azure
+Maps, shape maps, decomposition trees, key influencers, text boxes, shapes,
+buttons, and images. Call `list_powerbi_visual_capabilities` to get the
+authoritative type list, accepted field roles, and required configuration for
+each type.
+
+New specifications assign fields through a visual-specific `fields` map. For
+example, a scatter chart uses `x` and `y`, while a combo chart uses `axis`,
+`column_values`, and `line_values`. The older `category`, `values`, and
+`series` properties remain supported for existing specifications. All visuals
+use the same 12-column grid, converted into deterministic PBIR pixel positions.
+
+Unlisted AppSource, organizational, or private custom visuals are supported only
+through an inline `custom_visual` adapter. The adapter must declare the exact
+data roles and set both `trusted: true` and `installed: true`. The compiler
+never downloads or installs executable `.pbiviz` packages; it only authors
+configuration for a visual already available in the target environment.
 
 ## MCP workflow
 
-1. Call validate_dashboard_spec with the proposed specification.
-2. Fix field-role or layout errors.
-3. Call stage_pbir_report.
-4. Call validate_pbir_report or inspect_pbir_report on the staged report.
-5. Call `check_powerbi_cloud_qa_readiness`.
-6. Call `publish_pbir_to_fabric` with a remote semantic model ID.
-7. Call `render_powerbi_report` to export the real report pages as PNG files.
-8. Call `review_powerbi_render` to obtain structured visual findings.
-9. Call `decide_powerbi_visual_qa_iteration` and revise the specification when
+1. Call `list_powerbi_visual_capabilities` and select a valid type and roles.
+2. Call validate_dashboard_spec with the proposed specification.
+3. Fix field-role or layout errors.
+4. Call stage_pbir_report.
+5. Call validate_pbir_report or inspect_pbir_report on the staged report.
+6. Call `check_powerbi_cloud_qa_readiness`.
+7. Call `publish_pbir_to_fabric` with a remote semantic model ID.
+8. Call `render_powerbi_report` to export the real report pages as PNG files.
+9. Call `review_powerbi_render` to obtain structured visual findings.
+10. Call `decide_powerbi_visual_qa_iteration` and revise the specification when
    allowed. The default maximum is three attempts.
 
 A local model reference normally looks like ../Sales.SemanticModel. A report
@@ -89,6 +106,33 @@ Examples of sufficient follow-up instructions are: "improve the current
 dashboard", "add a regional analysis page", or "undo the last change". The
 agent owns the load, audit, revision, validation, versioning, rebuild, and
 Desktop handoff mechanics.
+
+## Runtime QA admission and refinement
+
+Dashboard creation, revision, and rollback pass through a runtime admission
+controller; this behavior does not depend on the language model remembering a
+prompt. Every reachable configured gate records evidence before promotion:
+layout, quality, live semantics when configured, compilation, Desktop binding,
+PBIR structure, official Microsoft schemas, and preview generation.
+
+Findings are classified as `blocking`, `improvement`, or `informational`.
+Blocking findings return `accepted: false` and `NEEDS_REVISION` with exact
+structured feedback while preserving the current active version. Improvement
+findings permit `VERIFIED_WITH_WARNINGS`. After three attempts, or repeated
+identical findings, the controller returns `NEEDS_REVIEW` instead of looping
+indefinitely. Candidate manifests and QA fingerprints remain under the
+workspace for auditability.
+
+The default policy runs official-schema checks from `.pbir-schema-cache`, does
+not download schemas, and treats a semantic catalog as configured only when one
+is supplied. Set `POWERBI_QA_REQUIRE_SEMANTIC_CATALOG=true` for fail-closed live
+semantic validation. `POWERBI_QA_BLOCKING_QUALITY_CODES` can promote selected
+quality recommendations to blocking defects.
+
+Cloud publication, PNG rendering, and multimodal review remain a separate gate
+because they require Fabric configuration and authorization for external
+writes. A local verification result must not be described as cloud-rendered or
+visually approved.
 
 ## Validation scope
 

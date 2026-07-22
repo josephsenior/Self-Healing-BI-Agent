@@ -76,35 +76,120 @@ def _projection(field: FieldRef, *, active: bool | None = None) -> dict[str, Any
 
 
 def _query_state(spec: VisualSpec) -> dict[str, Any]:
-    if spec.visual_type == "slicer":
-        return {"Values": {"projections": [_projection(spec.category, active=True)]}}
-    if spec.visual_type == "card":
-        return {"Data": {"projections": [_projection(spec.values[0])]}}
-    if spec.visual_type == "tableEx":
-        return {"Values": {"projections": [_projection(item) for item in spec.values]}}
-
-    state: dict[str, Any] = {
-        "Category": {"projections": [_projection(spec.category, active=True)]},
-        "Y": {"projections": [_projection(item) for item in spec.values]},
+    return {
+        role: {
+            "projections": [
+                _projection(
+                    item,
+                    active=True
+                    if role == "Values" and spec.visual_type == "slicer"
+                    else None,
+                )
+                for item in items
+            ]
+        }
+        for role, items in spec.resolved_fields().items()
     }
-    if spec.series:
-        state["Series"] = {"projections": [_projection(spec.series)]}
-    return state
+
+
+def _literal_expression(value: str) -> dict[str, Any]:
+    escaped = "'" + value.replace("'", "''") + "'"
+    return {"expr": {"Literal": {"Value": escaped}}}
+
+
+def _boolean_expression(value: bool) -> dict[str, Any]:
+    return {"expr": {"Literal": {"Value": str(value).lower()}}}
 
 
 def _title_objects(title: str) -> dict[str, Any]:
-    literal = "'" + title.replace("'", "''") + "'"
     return {
         "title": [{
             "properties": {
-                "show": {"expr": {"Literal": {"Value": "true"}}},
-                "text": {"expr": {"Literal": {"Value": literal}}},
+                "show": _boolean_expression(True),
+                "text": _literal_expression(title),
             }
         }]
     }
 
 
-def _compile_visual(spec: VisualSpec, visual_id: str, pixel: Any) -> dict[str, Any]:
+def _visual_objects(spec: VisualSpec) -> dict[str, Any] | None:
+    if spec.visual_type == "textbox":
+        return {"general": [{"properties": {"paragraphs": [{
+            "textRuns": [{"value": spec.content, "textStyle": {
+                "fontSize": f"{spec.font_size}pt", "color": spec.font_color,
+            }}],
+            "horizontalTextAlignment": spec.text_alignment,
+        }]}}]}
+    if spec.visual_type == "basicShape":
+        objects: dict[str, Any] = {"general": [{"properties": {
+            "shapeType": _literal_expression(spec.shape_type),
+        }}]}
+        if spec.content:
+            objects["text"] = [
+                {"properties": {"show": _boolean_expression(True)}},
+                {"properties": {"text": _literal_expression(spec.content)},
+                 "selector": {"id": "default"}},
+            ]
+        return objects
+    if spec.visual_type == "actionButton":
+        return {"text": [
+            {"properties": {"show": _boolean_expression(True)}},
+            {"properties": {
+                "text": _literal_expression(spec.content or spec.title),
+                "fontSize": {"expr": {"Literal": {"Value": f"{spec.font_size}D"}}},
+                "horizontalAlignment": _literal_expression(spec.text_alignment),
+            }, "selector": {"id": "default"}},
+        ]}
+    if spec.visual_type == "image" and spec.image_url:
+        return {"general": [{"properties": {
+            "imageUrl": _literal_expression(spec.image_url),
+        }}]}
+    return None
+
+
+def _container_objects(
+    spec: VisualSpec,
+    page_targets: dict[str, str],
+) -> dict[str, Any] | None:
+    if spec.visual_type != "actionButton":
+        return None if spec.visual_type in {"textbox", "basicShape", "image"} else _title_objects(spec.title)
+    action = spec.action
+    properties = {
+        "show": _boolean_expression(True),
+        "type": _literal_expression(
+            "WebUrl" if action.action_type == "webUrl" else "PageNavigation"
+        ),
+    }
+    if action.action_type == "webUrl":
+        properties["webUrl"] = _literal_expression(action.target)
+    else:
+        properties["navigationSection"] = _literal_expression(
+            page_targets[action.target.casefold()]
+        )
+    if action.tooltip:
+        properties["tooltip"] = _literal_expression(action.tooltip)
+    return {"visualLink": [{"properties": properties}]}
+
+
+def _compile_visual(
+    spec: VisualSpec,
+    visual_id: str,
+    pixel: Any,
+    page_targets: dict[str, str],
+) -> dict[str, Any]:
+    visual: dict[str, Any] = {
+        "visualType": spec.visual_type,
+        "drillFilterOtherVisuals": True,
+    }
+    query_state = _query_state(spec)
+    if query_state:
+        visual["query"] = {"queryState": query_state}
+    objects = _visual_objects(spec)
+    if objects:
+        visual["objects"] = objects
+    container_objects = _container_objects(spec, page_targets)
+    if container_objects:
+        visual["visualContainerObjects"] = container_objects
     return {
         "$schema": VISUAL_SCHEMA,
         "name": visual_id,
@@ -113,12 +198,7 @@ def _compile_visual(spec: VisualSpec, visual_id: str, pixel: Any) -> dict[str, A
             "height": pixel.height, "width": pixel.width,
             "tabOrder": pixel.tab_order,
         },
-        "visual": {
-            "visualType": spec.visual_type,
-            "query": {"queryState": _query_state(spec)},
-            "visualContainerObjects": _title_objects(spec.title),
-            "drillFilterOtherVisuals": True,
-        },
+        "visual": visual,
     }
 
 
@@ -190,6 +270,10 @@ def compile_report(
     })
 
     page_ids = [_identifier(f"{spec.title}:page:{page.name}") for page in spec.pages]
+    page_targets = {
+        page.name.casefold(): page_id
+        for page, page_id in zip(spec.pages, page_ids)
+    }
     _write_json(pages_root / "pages.json", {
         "$schema": PAGES_SCHEMA,
         "pageOrder": page_ids,
@@ -215,7 +299,7 @@ def compile_report(
             )
             _write_json(
                 page_root / "visuals" / visual_id / "visual.json",
-                _compile_visual(visual, visual_id, pixel),
+                _compile_visual(visual, visual_id, pixel, page_targets),
             )
 
     files = sorted(

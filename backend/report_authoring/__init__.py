@@ -18,6 +18,8 @@ from .desktop import (
     prepare_report_for_desktop,
 )
 from .workspace import DashboardWorkspaceManager, WorkspaceRevisionResult
+from .qa import DashboardQARejected, QAPolicy, QAReport
+from .visual_capabilities import list_visual_capabilities
 
 __all__ = [
     "CompilationResult",
@@ -37,4 +39,8 @@ __all__ = [
     "prepare_report_for_desktop",
     "DashboardWorkspaceManager",
     "WorkspaceRevisionResult",
+    "DashboardQARejected",
+    "QAPolicy",
+    "QAReport",
+    "list_visual_capabilities",
 ]

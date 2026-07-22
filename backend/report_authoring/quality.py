@@ -35,7 +35,10 @@ def evaluate_report_quality(spec: DashboardSpec) -> list[QualityIssue]:
                 f"page contains {slicers} slicers; target 4 or fewer",
                 page.name,
             ))
-        if not any(item.visual_type == "card" for item in page.visuals):
+        if not any(
+            item.visual_type in {"card", "multiRowCard", "kpi", "gauge"}
+            for item in page.visuals
+        ):
             issues.append(QualityIssue(
                 "info", "no_kpi_card",
                 "page has no KPI card; confirm this is intentional",
@@ -55,8 +58,13 @@ def evaluate_report_quality(spec: DashboardSpec) -> list[QualityIssue]:
                     f"visual is only {pixel.width}x{pixel.height} pixels",
                     page.name, visual.title,
                 ))
-            if visual.visual_type in {"barChart", "clusteredColumnChart", "lineChart"}:
-                if len(visual.values) > 4:
+            if visual.visual_type in {
+                "barChart", "clusteredBarChart", "stackedBarChart",
+                "hundredPercentStackedBarChart", "clusteredColumnChart",
+                "stackedColumnChart", "hundredPercentStackedColumnChart",
+                "lineChart", "areaChart", "stackedAreaChart", "ribbonChart",
+            }:
+                if len(visual.fields_for_role("values")) > 4:
                     issues.append(QualityIssue(
                         "warning", "too_many_series",
                         "chart has more than four value series",

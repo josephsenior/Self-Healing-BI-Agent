@@ -167,6 +167,7 @@ from report_authoring import (
     DashboardSpec,
     compile_report,
     inspect_pbir_project,
+    list_visual_capabilities,
     validate_pbir_project,
 )
 from report_authoring.layout import validate_page_layout
@@ -306,6 +307,25 @@ def _dashboard_manager():
     return DashboardWorkspaceManager(AUTHORING_ROOT / ".dashboard-workspaces")
 
 
+def _qa_workspace_response(operation) -> str:
+    from report_authoring.qa import DashboardQARejected
+
+    try:
+        result = operation()
+    except DashboardQARejected as exc:
+        return json.dumps({
+            "accepted": False,
+            "candidate_manifest_path": exc.candidate_manifest_path,
+            "qa": exc.report.to_dict(),
+            "next_action": (
+                "revise the DashboardSpec from blocking findings and retry"
+                if exc.report.status == "NEEDS_REVISION"
+                else "stop automatic retries and request human review"
+            ),
+        }, indent=2)
+    return json.dumps({"accepted": True, **result.to_dict()}, indent=2)
+
+
 @mcp.tool()
 def create_dashboard_workspace(
     spec: Dict[str, Any],
@@ -317,14 +337,13 @@ def create_dashboard_workspace(
     """Create a persistent, versioned dashboard and make it active."""
     from report_authoring.semantic import SemanticModelCatalog
 
-    result = _dashboard_manager().create(
+    return _qa_workspace_response(lambda: _dashboard_manager().create(
         DashboardSpec.model_validate(spec),
         semantic_model_path=semantic_model_path or None,
         dashboard_id=dashboard_id or None,
         catalog=SemanticModelCatalog.model_validate(catalog) if catalog else None,
         reason=reason,
-    )
-    return json.dumps(result.to_dict(), indent=2)
+    ))
 
 
 @mcp.tool()
@@ -365,14 +384,13 @@ def revise_active_dashboard(
     """Validate and compile a new immutable version of the active dashboard."""
     from report_authoring.semantic import SemanticModelCatalog
 
-    result = _dashboard_manager().revise(
+    return _qa_workspace_response(lambda: _dashboard_manager().revise(
         DashboardSpec.model_validate(spec),
         reason=reason,
         expected_version=expected_version,
         dashboard_id=dashboard_id or None,
         catalog=SemanticModelCatalog.model_validate(catalog) if catalog else None,
-    )
-    return json.dumps(result.to_dict(), indent=2)
+    ))
 
 
 @mcp.tool()
@@ -384,10 +402,19 @@ def list_dashboard_versions(dashboard_id: str = "") -> str:
 
 
 @mcp.tool()
-def rollback_dashboard(target_version: int, dashboard_id: str = "") -> str:
-    """Restore an earlier dashboard spec as a new auditable version."""
-    result = _dashboard_manager().rollback(target_version, dashboard_id or None)
-    return json.dumps(result.to_dict(), indent=2)
+def rollback_dashboard(
+    target_version: int,
+    dashboard_id: str = "",
+    catalog: Dict[str, Any] | None = None,
+) -> str:
+    """Restore an earlier spec through the same runtime QA admission loop."""
+    from report_authoring.semantic import SemanticModelCatalog
+
+    return _qa_workspace_response(lambda: _dashboard_manager().rollback(
+        target_version,
+        dashboard_id or None,
+        SemanticModelCatalog.model_validate(catalog) if catalog else None,
+    ))
 
 
 @mcp.tool()
@@ -427,6 +454,12 @@ def check_powerbi_cloud_qa_readiness() -> str:
         "ready": all(bool(checks[item]) for item in required),
         "checks": checks,
     }, indent=2)
+
+
+@mcp.tool()
+def list_powerbi_visual_capabilities() -> str:
+    """List supported native Power BI visuals and their accepted field roles."""
+    return json.dumps({"visuals": list_visual_capabilities()}, indent=2)
 
 
 @mcp.tool()

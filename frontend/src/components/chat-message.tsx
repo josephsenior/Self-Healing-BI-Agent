@@ -171,7 +171,12 @@ export function ChatMessageBubble({
                 if (!cleanedText && !isStreaming) return null;
                 return (
                   <div key={`text-${pIdx}`}>
-                    {cleanedText && <MarkdownRenderer content={cleanedText} />}
+                    {cleanedText && (
+                      <MarkdownRenderer
+                        content={cleanedText}
+                        isStreaming={isStreaming && isLastPart}
+                      />
+                    )}
                     {isStreaming && isLastPart && (
                       <span className="inline-block w-0.5 h-3.5 bg-zinc-400 ml-0.5 animate-pulse align-middle" />
                     )}
@@ -188,7 +193,9 @@ export function ChatMessageBubble({
               <ReasoningStrip text={reasoningText} isStreaming={reasoningStreaming} />
             )}
 
-            {displayContent && <MarkdownRenderer content={displayContent} />}
+            {displayContent && (
+              <MarkdownRenderer content={displayContent} isStreaming={isStreaming} />
+            )}
 
             {isStreaming && displayContent && (
               <span className="inline-block w-0.5 h-3.5 bg-zinc-400 ml-0.5 animate-pulse align-middle" />

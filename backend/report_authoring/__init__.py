@@ -14,6 +14,7 @@ from .visual_review import (
 )
 from .desktop import (
     DesktopHandoffResult,
+    ensure_staging_semantic_model,
     open_report_in_powerbi_desktop,
     prepare_report_for_desktop,
 )

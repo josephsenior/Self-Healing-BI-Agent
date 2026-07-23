@@ -570,5 +570,15 @@ class StatefulDashboardWorkspaceTests(unittest.TestCase):
             self.assertTrue(opened["opened"])
             self.assertEqual(opened["version"], 1)
 
+    def test_open_active_auto_generates_staging_model(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as root_value:
+            root = Path(root_value)
+            manager = DashboardWorkspaceManager(root / "workspaces")
+            created = manager.create(sample_spec(), semantic_model_path=None)
+            with patch("backend.report_authoring.desktop.os.startfile"):
+                opened = manager.open_active_in_desktop()
+            self.assertTrue(opened["opened"])
+            self.assertTrue("Staging.SemanticModel" in opened["semantic_model_path"])
+
 if __name__ == "__main__":
     unittest.main()

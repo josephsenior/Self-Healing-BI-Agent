@@ -11,7 +11,11 @@ from pathlib import Path
 from typing import Any
 
 from .compiler import CompilationResult, compile_report
-from .desktop import open_report_in_powerbi_desktop, prepare_report_for_desktop
+from .desktop import (
+    ensure_staging_semantic_model,
+    open_report_in_powerbi_desktop,
+    prepare_report_for_desktop,
+)
 from .layout import validate_page_layout
 from .models import DashboardSpec
 from .preview import build_preview_manifest
@@ -368,7 +372,9 @@ class DashboardWorkspaceManager:
             ))
             gates.append(QAGateResult("compile", GateStatus.FAILED, 1, str(exc)))
 
-        if build is not None and semantic_model_path:
+        if build is not None:
+            if not semantic_model_path:
+                semantic_model_path = str(ensure_staging_semantic_model(self._dashboard_root(dashboard_id)))
             try:
                 handoff = prepare_report_for_desktop(report_path, semantic_model_path)
                 pbir_path = handoff.pbir_path
@@ -384,12 +390,6 @@ class DashboardWorkspaceManager:
                 gates.append(QAGateResult(
                     "desktop_binding", GateStatus.FAILED, 1, str(exc)
                 ))
-        elif build is not None:
-            gates.append(QAGateResult(
-                "desktop_binding",
-                GateStatus.SKIPPED,
-                detail="not configured: no local semantic-model path",
-            ))
         else:
             gates.append(QAGateResult(
                 "desktop_binding", GateStatus.BLOCKED, detail="compile failed"
@@ -725,10 +725,10 @@ class DashboardWorkspaceManager:
         current = state["current"]
         model_path = semantic_model_path or record.get("semantic_model_path")
         if not model_path:
-            raise ValueError("semantic_model_path is required for Desktop rendering")
+            model_path = str(ensure_staging_semantic_model(self._dashboard_root(selected_id)))
         handoff = prepare_report_for_desktop(current["report_path"], model_path)
         opened = open_report_in_powerbi_desktop(handoff.report_path)
-        if semantic_model_path and semantic_model_path != record.get("semantic_model_path"):
+        if model_path != record.get("semantic_model_path"):
             record["semantic_model_path"] = handoff.semantic_model_path
             record["updated_at"] = _utc_now()
             _write_json_atomic(self._record_path(selected_id), record)

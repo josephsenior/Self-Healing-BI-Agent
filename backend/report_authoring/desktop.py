@@ -21,6 +21,20 @@ class DesktopHandoffResult:
         return asdict(self)
 
 
+def ensure_staging_semantic_model(dashboard_root: str | Path) -> Path:
+    """Create a default staging .SemanticModel directory with definition.pbism if not present."""
+    root = Path(dashboard_root).resolve()
+    model_dir = root / "Staging.SemanticModel"
+    model_dir.mkdir(parents=True, exist_ok=True)
+    pbism_file = model_dir / "definition.pbism"
+    if not pbism_file.exists():
+        pbism_file.write_text(
+            json.dumps({"$schema": "https://developer.microsoft.com/json-schemas/fabric/item/semanticModel/definition/1.0.0/schema.json"}, indent=2) + "\n",
+            encoding="utf-8",
+        )
+    return model_dir
+
+
 def _semantic_model_root(value: str | Path) -> Path:
     path = Path(value).resolve()
     if path.is_file() and path.name == "definition.pbism":

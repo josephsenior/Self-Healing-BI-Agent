@@ -177,6 +177,39 @@ AUTHORING_ROOT = Path(
 ).resolve()
 
 
+def _bigquery_service():
+    """Create the read-only BigQuery facade only when a tool is called."""
+    try:
+        from backend.bigquery import BigQueryService
+    except ModuleNotFoundError:
+        from bigquery import BigQueryService
+    return BigQueryService()
+
+
+@mcp.tool()
+def bigquery_list_tables(dataset: str) -> str:
+    """List tables/views in an allowlisted BigQuery dataset for dashboard planning."""
+    return json.dumps({"tables": _bigquery_service().list_tables(dataset)}, indent=2)
+
+
+@mcp.tool()
+def bigquery_get_table_schema(table: str) -> str:
+    """Inspect BigQuery table columns before defining a Power BI semantic model."""
+    return json.dumps({"table": table, "fields": _bigquery_service().schema(table)}, indent=2)
+
+
+@mcp.tool()
+def bigquery_query(sql: str, max_rows: int = 1000) -> str:
+    """Run one bounded, read-only Standard SQL SELECT/WITH query against BigQuery."""
+    return json.dumps(_bigquery_service().query(sql, max_rows=max_rows), indent=2, default=str)
+
+
+@mcp.tool()
+def bigquery_semantic_catalog(table: str) -> str:
+    """Convert a BigQuery table schema into a DashboardSpec semantic catalog."""
+    return json.dumps(_bigquery_service().catalog(table).model_dump(), indent=2)
+
+
 def _allowed_authoring_path(value: str) -> Path:
     candidate = Path(value)
     if not candidate.is_absolute():

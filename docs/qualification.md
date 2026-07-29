@@ -55,9 +55,18 @@ POWERBI_VISION_PROVIDER=gemini
 POWERBI_VISION_MODEL=gemini-3.6-flash
 ~~~
 
-The Entra application must be a Contributor in the staging workspace. The Fabric
-administrator must enable service-principal access to Fabric and Power BI APIs, and
-Export reports as image files must be enabled for PNG rendering.
+The workspace must be assigned to the active Fabric trial capacity, and the Entra
+application must have the Contributor workspace role. A Fabric tenant administrator
+must enable these settings for the application (directly or through an allowed
+security group):
+
+- Service principals can call Fabric public APIs
+- Allow service principals to use Power BI APIs
+- Dataset Execute Queries REST API
+- Export reports as image files
+
+The PNG Export-to-file API requires a workspace backed by Fabric, Premium, or
+Embedded capacity; Premium Per User alone is not supported.
 
 ## Run it
 

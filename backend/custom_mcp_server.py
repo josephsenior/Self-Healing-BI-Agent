@@ -490,6 +490,15 @@ def check_powerbi_cloud_qa_readiness() -> str:
 
 
 @mcp.tool()
+def run_full_autonomous_agent_qualification(
+    max_visual_attempts: int = 3,
+) -> str:
+    """Provision synthetic Fabric assets and qualify the complete cloud QA path."""
+    from report_authoring.qualification import run_full_agent_qualification
+
+    return json.dumps(run_full_agent_qualification(max_visual_attempts), indent=2)
+
+@mcp.tool()
 def list_powerbi_visual_capabilities() -> str:
     """List supported native Power BI visuals and their accepted field roles."""
     return json.dumps({"visuals": list_visual_capabilities()}, indent=2)

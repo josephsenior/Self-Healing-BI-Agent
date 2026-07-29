@@ -174,3 +174,5 @@ Messages are JSON objects with a `type` discriminator:
 ## Further Reading
 
 See [docs/architecture.md](docs/architecture.md) for a detailed breakdown of the elicitation suspension/resume flow, dual-transport connection management, and dynamic tool schema mapping.
+
+See [docs/qualification.md](docs/qualification.md) for the idempotent single-user Fabric semantic-model, report, PNG rendering, and visual-QA qualification workflow.

@@ -1,0 +1,318 @@
+%%{init: {"flowchart": {"defaultRenderer": "elk", "curve": "linear", "nodeSpacing": 35, "rankSpacing": 55}, "themeVariables": {"fontSize": "16px"}}}%%
+flowchart TB
+
+classDef channel fill:#e8f1ff,stroke:#2563eb,color:#102a56,stroke-width:1px;
+classDef graphNode fill:#ede9fe,stroke:#6d28d9,color:#2e1065,stroke-width:1px;
+classDef agent fill:#dbeafe,stroke:#1d4ed8,color:#172554,stroke-width:2px;
+classDef deterministic fill:#dcfce7,stroke:#15803d,color:#052e16,stroke-width:1px;
+classDef security fill:#fee2e2,stroke:#b91c1c,color:#450a0a,stroke-width:2px;
+classDef state fill:#f3e8ff,stroke:#7e22ce,color:#3b0764,stroke-width:1px;
+classDef output fill:#cffafe,stroke:#0e7490,color:#083344,stroke-width:1px;
+classDef decision fill:#fef3c7,stroke:#b45309,color:#451a03,stroke-width:2px;
+classDef failure fill:#ffe4e6,stroke:#be123c,color:#4c0519,stroke-width:1px;
+classDef optional fill:#f1f5f9,stroke:#64748b,color:#0f172a,stroke-dasharray:5 3;
+classDef handoff fill:#fff7ed,stroke:#c2410c,color:#431407,stroke-width:2px;
+
+LEGEND["READING ORDER<br/>Follow the thick orange handoffs from Layer 1 to Layer 10.<br/>Blue = bounded LLM judgment · Purple = graph state/runtime<br/>Green = deterministic code · Red = security/human authority<br/>Cyan = verified output · Yellow = decision and rejected alternative"]:::decision
+
+%% ============================================================================
+%% LAYER 1
+%% ============================================================================
+subgraph L1["LAYER 1 · USER INTENT AND CLIENT INPUT"]
+  direction LR
+  L1_USER["Single authenticated analyst<br/>Question · analysis · dashboard creation<br/>revision · local open · cloud publish"]:::channel
+  L1_UI["React / Next.js console<br/>Conversation · status · tool activity<br/>approval modal · cancellation · artifact links"]:::channel
+  L1_WS["Persistent WebSocket request<br/>text · thread_id · optional dashboard_id<br/>timezone · configured provider"]:::channel
+  L1_D1["D1 · React remains presentation-only<br/>Why: rich streaming and approval UX.<br/>Not chosen: browser-owned orchestration;<br/>refreshes and multiple tabs are not durable."]:::decision
+  L1_D2["D2 · Single-user now, identity-ready envelope<br/>Why: harden the core workflow first.<br/>Not chosen yet: multi-user RBAC because it<br/>multiplies policy combinations prematurely."]:::decision
+  L1_USER --> L1_UI --> L1_WS
+  L1_D1 ~~~ L1_UI
+  L1_D2 ~~~ L1_WS
+end
+L1_OUT["HANDOFF 1<br/>Raw RequestEnvelope"]:::handoff
+L1_WS ==> L1_OUT
+
+%% ============================================================================
+%% LAYER 2
+%% ============================================================================
+subgraph L2["LAYER 2 · API GATEWAY AND RUN CONTEXT"]
+  direction LR
+  L2_API["FastAPI WebSocket endpoint<br/>Validate envelope and message size<br/>Reject malformed input<br/>Attach cancellation handling"]:::deterministic
+  L2_CTX["RunContext<br/>run_id · thread_id · user_id · correlation_id<br/>timezone · provider · transport mode<br/>cancellation token"]:::state
+  L2_EVENTS["Typed event emitter<br/>Stable UI event protocol<br/>Redact secrets and oversized raw results"]:::deterministic
+  L2_D3["D3 · Backend owns execution lifetime<br/>Why: a run must survive UI reconnects.<br/>Not chosen: synchronous request/response because<br/>tool calls and approvals can be long-running."]:::decision
+  L2_D4["D4 · Stable typed events, not provider events<br/>Why: the UI should not change when the model changes.<br/>Not chosen: forwarding raw SDK streams because<br/>OpenAI, Anthropic, and Google event shapes differ."]:::decision
+  L2_API --> L2_CTX
+  L2_CTX -. emits through .-> L2_EVENTS
+  L2_D3 ~~~ L2_CTX
+  L2_D4 ~~~ L2_EVENTS
+end
+L2_OUT["HANDOFF 2<br/>Validated RunContext + normalized request"]:::handoff
+L1_OUT ==> L2_API
+L2_CTX ==> L2_OUT
+
+%% ============================================================================
+%% LAYER 3
+%% ============================================================================
+subgraph L3["LAYER 3 · LANGGRAPH CONTROL PLANE"]
+  direction LR
+  L3_LOAD["START / RESUME<br/>Load checkpoint and active-dashboard metadata"]:::graphNode
+  L3_NORMALIZE["Normalize request<br/>Preserve original text<br/>Resolve references such as current dashboard"]:::deterministic
+  L3_CLASSIFY{"Classify intent and required authority"}:::graphNode
+  L3_ROUTE["Selected route<br/>answer · analysis · create · revise<br/>local open · cloud publish · qualification"]:::state
+  L3_STATE[["Authoritative AgentState<br/>request and constraints<br/>source selection and query plan<br/>query evidence and semantic catalog<br/>DashboardSpec and workspace version<br/>validation, approvals, errors, artifacts"]]:::state
+  L3_CHECKPOINT[("Checkpoint store<br/>Local: SQLite<br/>Enterprise: PostgreSQL<br/>Persist after external side effects")]:::state
+  L3_D5["D5 · LangGraph is the runtime<br/>Why: explicit transitions, resume, interrupts, replay.<br/>Not chosen: one global while-true ReAct loop because<br/>termination and recovery become model-dependent."]:::decision
+  L3_D6["D6 · Checkpoint side effects, not every token<br/>Why: prevent duplicate queries/publications on restart.<br/>Not chosen now: Temporal because its operational<br/>weight is excessive for the single-user phase."]:::decision
+  L3_LOAD --> L3_NORMALIZE --> L3_CLASSIFY --> L3_ROUTE
+  L3_ROUTE -. updates .-> L3_STATE
+  L3_STATE <--> L3_CHECKPOINT
+  L3_D5 ~~~ L3_CLASSIFY
+  L3_D6 ~~~ L3_CHECKPOINT
+end
+L3_OUT["HANDOFF 3<br/>Selected workflow route + durable AgentState"]:::handoff
+L2_OUT ==> L3_LOAD
+L3_ROUTE ==> L3_OUT
+
+%% ============================================================================
+%% LAYER 4
+%% ============================================================================
+subgraph L4["LAYER 4 · BOUNDED ANALYSIS AND PLANNING"]
+  direction LR
+  L4_MODEL["LangChain ChatModel adapter<br/>OpenAI · Anthropic · Google<br/>Common structured output, timeout, token budget"]:::deterministic
+  L4_ANALYST["Analyst agent<br/>Maximum 2 correction attempts<br/>Interpret business goal<br/>Select metadata and fields<br/>Propose read-only QueryPlan"]:::agent
+  L4_PLAN["Structured AnalysisPlan<br/>business question · expected grain<br/>tables/fields · filters · aggregations<br/>required output: answer or dashboard"]:::state
+  L4_BUDGET{"Planning output valid<br/>within attempt budget?"}:::graphNode
+  L4_REVIEW["Interrupt: NEEDS_REVIEW<br/>Unresolved ambiguity or repeated failure"]:::security
+  L4_D7["D7 · Provider-neutral model interface<br/>Why: one graph and one policy surface.<br/>Not chosen: copied provider loops because fixes,<br/>message conversion, and guardrails drift."]:::decision
+  L4_D8["D8 · ReAct only for judgment<br/>Why: ambiguity and query planning need reasoning.<br/>Not chosen: ReAct for credentials, validation,<br/>versioning, or publication—those paths are known."]:::decision
+  L4_MODEL --> L4_ANALYST --> L4_PLAN --> L4_BUDGET
+  L4_BUDGET -->|invalid and attempts remain| L4_ANALYST
+  L4_BUDGET -->|repeated or uncertain| L4_REVIEW
+  L4_D7 ~~~ L4_MODEL
+  L4_D8 ~~~ L4_ANALYST
+end
+L4_OUT["HANDOFF 4<br/>Approved structured AnalysisPlan / QueryPlan"]:::handoff
+L3_OUT ==> L4_MODEL
+L4_BUDGET ==>|valid| L4_OUT
+
+%% ============================================================================
+%% LAYER 5
+%% ============================================================================
+subgraph L5["LAYER 5 · MCP TOOL BOUNDARY AND BIGQUERY DATA ACQUISITION"]
+  direction TB
+
+  subgraph L5_MCP["5A · MCP ADAPTER"]
+    direction LR
+    L5_DISCOVER["Discover MCP tools<br/>Read JSON schemas dynamically"]:::deterministic
+    L5_REGISTRY["Tool registry and policy metadata<br/>owner session · read/write class<br/>timeout · retry class · approval requirement"]:::deterministic
+    L5_DISPATCH["Warm multi-session dispatcher<br/>Microsoft Modeling MCP + Custom FastMCP"]:::deterministic
+    L5_ELICIT["MCP elicitation → LangGraph interrupt<br/>Exact operation shown to user"]:::security
+    L5_APPROVE{"User explicitly approves?"}:::security
+    L5_DISCOVER --> L5_REGISTRY --> L5_DISPATCH
+    L5_DISPATCH -. approval-required call .-> L5_ELICIT --> L5_APPROVE
+    L5_APPROVE -->|approved; checkpoint| L5_DISPATCH
+  end
+
+  subgraph L5_BQ["5B · BIGQUERY READ-ONLY SERVICE"]
+    direction LR
+    L5_CONFIG["BigQuerySettings<br/>credential path · billing project · location<br/>mandatory dataset allowlist<br/>max bytes billed · max returned rows"]:::security
+    L5_META["Allowlisted metadata<br/>list tables · read schema<br/>create SemanticModelCatalog"]:::deterministic
+    L5_STATIC["Static SQL preflight<br/>One SELECT/WITH · no scripts<br/>reject writes/admin/EXTERNAL_QUERY<br/>check explicit qualified resources"]:::security
+    L5_DRY["BigQuery dry run<br/>Standard SQL · cache disabled<br/>maximum bytes enforced"]:::security
+    L5_REFS{"Every resolved project.dataset allowlisted?"}:::security
+    L5_EXEC["Execute bounded query<br/>Apply maximum bytes again<br/>Materialize configured row limit"]:::deterministic
+    L5_RESULT["QueryEvidence<br/>columns · rows · accurate row_count<br/>resolved tables · bytes · applied limit"]:::state
+    L5_DENY["Policy failure<br/>No executable query submitted"]:::failure
+    L5_CATALOG["SemanticModelCatalog<br/>tables · fields · data types"]:::state
+    L5_CONFIG --> L5_META --> L5_CATALOG
+    L5_STATIC --> L5_DRY --> L5_REFS
+    L5_REFS -->|yes| L5_EXEC --> L5_RESULT
+    L5_REFS -->|no| L5_DENY
+  end
+
+  L5_D9["D9 · MCP remains the tool protocol<br/>Why: dynamic discovery isolates orchestration from vendors.<br/>Not chosen: SDK calls inside reasoning nodes because<br/>transport, schemas, and credentials become coupled."]:::decision
+  L5_D10["D10 · BigQuery extraction is deterministic code<br/>Why: least privilege and cost limits must be reproducible.<br/>Not chosen: an extraction agent with Google-client access<br/>because prompts cannot enforce a security boundary."]:::decision
+  L5_D11["D11 · Static checks plus BigQuery dry run<br/>Why: lexical checks catch escapes; BigQuery resolves SQL.<br/>Not chosen: regex-only or IAM-only protection because<br/>application policy is narrower and SQL is not purely lexical."]:::decision
+
+  L5_DISPATCH --> L5_META
+  L5_DISPATCH --> L5_STATIC
+  L5_D9 ~~~ L5_REGISTRY
+  L5_D10 ~~~ L5_CONFIG
+  L5_D11 ~~~ L5_DRY
+end
+L5_OUT["HANDOFF 5<br/>QueryEvidence + SemanticModelCatalog<br/>No credentials included"]:::handoff
+L4_OUT ==> L5_DISCOVER
+L4_OUT ==> L5_STATIC
+L5_RESULT ==> L5_OUT
+L5_CATALOG ==> L5_OUT
+
+%% ============================================================================
+%% LAYER 6
+%% ============================================================================
+subgraph L6["LAYER 6 · SEMANTIC MODEL AND REPORT BUILD"]
+  direction TB
+
+  subgraph L6_MODEL["6A · BIGQUERY → POWER BI SEMANTIC MODEL"]
+    direction LR
+    L6_BRIDGE["Create deterministic .SemanticModel<br/>definition.pbism · model.bim<br/>non-secret audit manifest"]:::deterministic
+    L6_M["Native Power Query partition<br/>GoogleBigQuery.Database<br/>BillingProject · ADBC 2.0<br/>UseStorageApi false by default"]:::deterministic
+    L6_MODE{"Storage mode"}:::graphNode
+    L6_DIRECT["DirectQuery default<br/>Fresh data · smaller local artifact"]:::deterministic
+    L6_IMPORT["Import optional<br/>Faster/offline · explicit refresh lifecycle"]:::deterministic
+    L6_CRED["Power BI Desktop credential store<br/>Possible one-time sign-in<br/>Never embed keys or tokens in PBIP"]:::security
+    L6_BRIDGE --> L6_M --> L6_MODE
+    L6_MODE -->|default| L6_DIRECT --> L6_CRED
+    L6_MODE -->|explicit| L6_IMPORT --> L6_CRED
+  end
+
+  subgraph L6_REPORT["6B · REPORT BUILDER"]
+    direction LR
+    L6_CAPS["Registered visual capabilities<br/>visual type → field roles/configuration<br/>Reject unknown untrusted custom visual"]:::deterministic
+    L6_BUILDER["Report Builder agent<br/>Maximum 2 structured corrections<br/>Choose visuals and narrative<br/>Cannot edit PBIR directly"]:::agent
+    L6_SPEC["Strict DashboardSpec<br/>title · relative dataset path<br/>pages · positions · typed field references"]:::state
+    L6_COMPILE["Deterministic PBIR compiler<br/>DashboardSpec → definition.pbir<br/>pages · visuals · queries · resources"]:::deterministic
+    L6_WORKSPACE["Candidate workspace revision<br/>immutable version · expected_version check<br/>atomic write · audit · rollback metadata"]:::deterministic
+    L6_CAPS --> L6_BUILDER --> L6_SPEC --> L6_COMPILE --> L6_WORKSPACE
+  end
+
+  L6_D12["D12 · Generate a real Power Query connection<br/>Why: a catalog alone cannot make Desktop query BigQuery.<br/>Not chosen: embedding credentials because PBIP is portable,<br/>source-controlled, and not a secret store."]:::decision
+  L6_D13["D13 · DirectQuery default; Import optional<br/>Why: current data without copying the dataset.<br/>Use Import when offline speed outweighs freshness;<br/>the storage choice is explicit and auditable."]:::decision
+  L6_D14["D14 · LLM creates DashboardSpec, not PBIR JSON<br/>Why: a narrow typed contract can be validated and compiled.<br/>Not chosen: free-form PBIR generation because hallucinated<br/>schema and fields would enter source artifacts."]:::decision
+  L6_D15["D15 · Immutable revisions and optimistic concurrency<br/>Why: safe rollback and complete audit history.<br/>Not chosen: edit active report in place because a partial<br/>failure destroys the last known-good version."]:::decision
+
+  L6_CATALOG_IN["Catalog and model-path input"]:::state
+  L6_CATALOG_IN --> L6_BRIDGE
+  L6_CATALOG_IN --> L6_CAPS
+  L6_D12 ~~~ L6_BRIDGE
+  L6_D13 ~~~ L6_MODE
+  L6_D14 ~~~ L6_SPEC
+  L6_D15 ~~~ L6_WORKSPACE
+end
+L6_OUT["HANDOFF 6<br/>CandidateBundle<br/>semantic model + DashboardSpec + compiled PBIR + base version"]:::handoff
+L5_OUT ==> L6_CATALOG_IN
+L6_WORKSPACE ==> L6_OUT
+L6_BRIDGE ==> L6_OUT
+
+%% ============================================================================
+%% LAYER 7
+%% ============================================================================
+subgraph L7["LAYER 7 · VALIDATION, ADMISSION, AND CONTAINED CORRECTION"]
+  direction LR
+  L7_SEM["Semantic validation<br/>table/column/measure exists<br/>hidden field · cardinality · numeric-role checks"]:::deterministic
+  L7_LAYOUT["Layout validation<br/>bounds · overlap · minimum usable size"]:::deterministic
+  L7_SCHEMA["Official PBIR JSON Schema validation<br/>trusted schema host/cache only"]:::security
+  L7_REVIEWER["Optional read-only reviewer<br/>Question answered?<br/>Evidence supports conclusion?<br/>Visual narrative understandable?"]:::agent
+  L7_ADMISSION{"Runtime QA admission controller"}:::security
+  L7_OK["VERIFIED<br/>Promote candidate"]:::output
+  L7_WARN["VERIFIED_WITH_WARNINGS<br/>Promote and preserve findings"]:::output
+  L7_FIX["NEEDS_REVISION<br/>Structured correction packet"]:::failure
+  L7_LOCAL_FIX["Contained Builder correction<br/>Update DashboardSpec only<br/>Maximum 2 attempts"]:::agent
+  L7_STOP["NEEDS_REVIEW<br/>Stop automatic retries"]:::security
+  L7_D16["D16 · Deterministic validation has final authority<br/>Why: security and schema correctness must be reproducible.<br/>Not chosen: one LLM approving another LLM because<br/>agreement is not evidence of correctness."]:::decision
+  L7_D17["D17 · Correction loop stays inside this layer<br/>Why: the pipeline order remains understandable and stateful.<br/>Not chosen: graph-wide back edges because they obscure<br/>which artifact failed and what may be changed."]:::decision
+
+  L7_SEM --> L7_LAYOUT --> L7_SCHEMA --> L7_REVIEWER --> L7_ADMISSION
+  L7_ADMISSION -->|valid| L7_OK
+  L7_ADMISSION -->|warnings only| L7_WARN
+  L7_ADMISSION -->|correctable and attempts remain| L7_FIX --> L7_LOCAL_FIX --> L7_SEM
+  L7_ADMISSION -->|repeated/uncertain| L7_STOP
+  L7_D16 ~~~ L7_ADMISSION
+  L7_D17 ~~~ L7_LOCAL_FIX
+end
+L7_OUT["HANDOFF 7<br/>AdmissionDecision + promoted version or review evidence"]:::handoff
+L6_OUT ==> L7_SEM
+L7_OK ==> L7_OUT
+L7_WARN ==> L7_OUT
+L7_STOP ==> L7_OUT
+
+%% ============================================================================
+%% LAYER 8
+%% ============================================================================
+subgraph L8["LAYER 8 · EXPLICIT DELIVERY BRANCH"]
+  direction TB
+  L8_CHOICE{"Requested delivery"}:::graphNode
+
+  subgraph L8_LOCAL["8A · LOCAL DESKTOP"]
+    direction LR
+    L8_BIND["Rebind definition.pbir by relative path<br/>to generated .SemanticModel<br/>Validate again before opening"]:::deterministic
+    L8_OPEN["Explicit os.startfile(definition.pbir)<br/>Power BI Desktop loads model/report"]:::output
+    L8_AUTH["Desktop may request one-time<br/>service-account data-source sign-in"]:::security
+    L8_BIND --> L8_OPEN --> L8_AUTH
+  end
+
+  subgraph L8_CLOUD["8B · OPTIONAL FABRIC"]
+    direction LR
+    L8_GATE{"Explicit request and approval recorded?"}:::security
+    L8_MSAL["MSAL token provider<br/>Separate Power BI/Fabric scopes<br/>Tokens never reach the LLM"]:::security
+    L8_READY["Readiness checks<br/>workspace · capacity/trial · API reachability"]:::deterministic
+    L8_IDEMP["Idempotent state<br/>persist resource IDs and completed steps"]:::state
+    L8_PUBLISH["Create/update model → refresh<br/>create/update report<br/>poll every LRO to terminal state"]:::deterministic
+    L8_RENDER["Render pages to PNG<br/>review visual evidence<br/>persist operation IDs"]:::deterministic
+    L8_CLOUD_OK["Verified Fabric IDs and render evidence"]:::output
+    L8_GATE -->|yes| L8_MSAL --> L8_READY --> L8_IDEMP --> L8_PUBLISH --> L8_RENDER --> L8_CLOUD_OK
+  end
+
+  L8_ANSWER["Answer/data-only delivery<br/>No report open or cloud mutation"]:::output
+  L8_D18["D18 · Local-first core; Fabric is optional<br/>Why: analysis remains usable without tenant administration.<br/>Not chosen: Fabric-first because Entra/Fabric access would<br/>block local qualification and development."]:::decision
+  L8_D19["D19 · Cloud workflow is idempotent code<br/>Why: mutations need exact IDs and terminal states.<br/>Not chosen: a cloud execution agent because improvised retries<br/>can duplicate resources or claim premature success."]:::decision
+
+  L8_CHOICE -->|answer only| L8_ANSWER
+  L8_CHOICE -->|explicit local open| L8_BIND
+  L8_CHOICE -->|explicit publish/qualification| L8_GATE
+  L8_D18 ~~~ L8_CHOICE
+  L8_D19 ~~~ L8_IDEMP
+end
+L8_OUT["HANDOFF 8<br/>DeliveryEvidence<br/>local path, cloud IDs, rendered pages, or answer-only result"]:::handoff
+L7_OUT ==> L8_CHOICE
+L8_ANSWER ==> L8_OUT
+L8_AUTH ==> L8_OUT
+L8_CLOUD_OK ==> L8_OUT
+
+%% ============================================================================
+%% LAYER 9
+%% ============================================================================
+subgraph L9["LAYER 9 · GOVERNANCE AND EVIDENCE AGGREGATION"]
+  direction LR
+  L9_ERROR{"Typed failure classification"}:::graphNode
+  L9_POLICY["Policy/security<br/>fail closed · never retry"]:::failure
+  L9_AUTH["Authorization<br/>durable interrupt for exact action"]:::failure
+  L9_TRANSIENT["Network/throttling<br/>bounded retry with deadline"]:::failure
+  L9_ARTIFACT["Semantic/schema/layout<br/>contained correction or NEEDS_REVIEW"]:::failure
+  L9_AUDIT["Audit record<br/>run IDs · sanitized tool arguments<br/>policy decisions · versions · resource IDs<br/>outcomes · timings"]:::deterministic
+  L9_METRICS["Metrics<br/>latency · token/tool cost · query bytes<br/>retries · QA pass rate · approvals"]:::deterministic
+  L9_TRACE["Optional LangSmith/OpenTelemetry<br/>redacted and replaceable<br/>not required for correctness"]:::optional
+  L9_SECRET["Secret boundary<br/>local env/OS store → enterprise vault<br/>never AgentState, prompt, PBIR, logs, or UI"]:::security
+  L9_D20["D20 · Retry by failure class; audit locally<br/>Why: transient failures may recover, policy failures will not.<br/>Not chosen: generic retries or mandatory SaaS tracing because<br/>they increase mutation risk and reduce local independence."]:::decision
+
+  L9_ERROR -->|policy| L9_POLICY
+  L9_ERROR -->|authorization| L9_AUTH
+  L9_ERROR -->|transient| L9_TRANSIENT
+  L9_ERROR -->|artifact| L9_ARTIFACT
+  L9_AUDIT --> L9_METRICS --> L9_TRACE
+  L9_SECRET ~~~ L9_AUDIT
+  L9_D20 ~~~ L9_ERROR
+end
+L9_OUT["HANDOFF 9<br/>Sanitized RunEvidence + audit reference + disclosed boundaries"]:::handoff
+L8_OUT ==> L9_AUDIT
+L8_OUT ==> L9_ERROR
+L9_AUDIT ==> L9_OUT
+
+%% ============================================================================
+%% LAYER 10
+%% ============================================================================
+subgraph L10["LAYER 10 · VERIFIED RESPONSE AND USER OUTPUT"]
+  direction LR
+  L10_ASSEMBLE["Final response assembler<br/>State exactly what completed<br/>Attach data/model/report paths or cloud IDs<br/>Include validation status and evidence<br/>Disclose remaining credential/approval boundary<br/>Never claim unverified success"]:::deterministic
+  L10_LOCAL["Local artifacts<br/>QueryEvidence · catalog · .SemanticModel<br/>versioned PBIR · audit · QA reports"]:::output
+  L10_CLOUD["Optional cloud artifacts<br/>Fabric model/report IDs<br/>rendered PNGs · terminal operations"]:::output
+  L10_EVENTS["Emit ordered final events<br/>artifact links · warnings · complete"]:::deterministic
+  L10_UI["React presentation<br/>Answer + evidence + next safe action"]:::channel
+  L10_USER["Analyst receives reproducible result"]:::output
+  L10_ASSEMBLE --> L10_LOCAL
+  L10_ASSEMBLE --> L10_CLOUD
+  L10_ASSEMBLE --> L10_EVENTS --> L10_UI --> L10_USER
+end
+L9_OUT ==> L10_ASSEMBLE
+
+LEGEND ~~~ L1_USER

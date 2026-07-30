@@ -210,6 +210,26 @@ def bigquery_semantic_catalog(table: str) -> str:
     return json.dumps(_bigquery_service().catalog(table).model_dump(), indent=2)
 
 
+@mcp.tool()
+def bigquery_create_powerbi_semantic_model(
+    table: str,
+    storage_mode: str = "directQuery",
+) -> str:
+    """Create a local PBIP semantic model with a native BigQuery M partition."""
+    result = _bigquery_service().create_powerbi_model(
+        table,
+        AUTHORING_ROOT / ".bigquery-models",
+        storage_mode=storage_mode,
+    )
+    return json.dumps({
+        **result.to_dict(),
+        "next_action": (
+            "Pass semantic_model_path and catalog to create_dashboard_workspace. "
+            "Power BI Desktop may require one-time Google data-source sign-in."
+        ),
+    }, indent=2)
+
+
 def _allowed_authoring_path(value: str) -> Path:
     candidate = Path(value)
     if not candidate.is_absolute():

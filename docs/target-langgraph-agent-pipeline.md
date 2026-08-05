@@ -59,14 +59,24 @@ subgraph L2["LAYER 2 · API GATEWAY AND RUN CONTEXT"]
   L2_API["FastAPI WebSocket endpoint<br/>Validate envelope and message size<br/>Reject malformed input<br/>Attach cancellation handling"]:::deterministic
   L2_CTX["RunContext<br/>run_id · thread_id · user_id · correlation_id<br/>timezone · provider · transport mode<br/>cancellation token"]:::state
   L2_EVENTS["Typed event emitter<br/>Stable UI event protocol<br/>Redact secrets and oversized raw results"]:::deterministic
+  L2_PORTS["Clean-architecture ports<br/>ContextStore · LockService<br/>EventPublisher · BigQueryGateway"]:::deterministic
+  L2_REDIS["Redis infrastructure adapter<br/>One application-scoped connection pool<br/>Checkpoint/context · locks · typed events<br/>TTL cleanup and compact state"]:::state
+  L2_DI["Application lifespan + dependency injection<br/>Create pool once per backend process<br/>Inject ports into graph and services<br/>No global Singleton state"]:::deterministic
   L2_D3["D3 · Backend owns execution lifetime<br/>Why: a run must survive UI reconnects.<br/>Not chosen: synchronous request/response because<br/>tool calls and approvals can be long-running."]:::decision
   L2_D4["D4 · Stable typed events, not provider events<br/>Why: the UI should not change when the model changes.<br/>Not chosen: forwarding raw SDK streams because<br/>OpenAI, Anthropic, and Google event shapes differ."]:::decision
+  L2_D3R["D3R · Redis is infrastructure, not agent logic<br/>Why: shared checkpoints, locks, events, and cache need<br/>process-independent storage.<br/>Not chosen: in-memory globals because they fail on restart<br/>or multi-worker execution."]:::decision
+  L2_D4R["D4R · Pool + dependency injection, not Singleton<br/>Why: reuse connections while preserving testability,<br/>worker isolation, lifecycle control, and replaceable adapters.<br/>Not chosen: hidden global client state."]:::decision
   L2_API --> L2_CTX
   L2_CTX -. emits through .-> L2_EVENTS
+  L2_PORTS --> L2_REDIS --> L2_DI
+  L2_CTX -. uses .-> L2_PORTS
+  L2_EVENTS -. uses .-> L2_PORTS
   L2_D3 ~~~ L2_CTX
   L2_D4 ~~~ L2_EVENTS
+  L2_D3R ~~~ L2_REDIS
+  L2_D4R ~~~ L2_DI
 end
-L2_OUT["HANDOFF 2<br/>Validated RunContext + normalized request"]:::handoff
+L2_OUT["HANDOFF 2<br/>Validated RunContext + injected infrastructure ports"]:::handoff
 L1_OUT ==> L2_API
 L2_CTX ==> L2_OUT
 
@@ -80,14 +90,18 @@ subgraph L3["LAYER 3 · LANGGRAPH CONTROL PLANE"]
   L3_CLASSIFY{"Classify intent and required authority"}:::graphNode
   L3_ROUTE["Selected route<br/>answer · analysis · create · revise<br/>local open · cloud publish · qualification"]:::state
   L3_STATE[["Authoritative AgentState<br/>request and constraints<br/>source selection and query plan<br/>query evidence and semantic catalog<br/>DashboardSpec and workspace version<br/>validation, approvals, errors, artifacts"]]:::state
-  L3_CHECKPOINT[("Checkpoint store<br/>Local: SQLite<br/>Enterprise: PostgreSQL<br/>Persist after external side effects")]:::state
+  L3_CHECKPOINT[("Context/checkpoint port<br/>Redis adapter via injected pool<br/>AgentState · active dashboard · approvals<br/>Persist after external side effects")]:::state
+  L3_COMPACT["Context policy<br/>Store structured facts and evidence summaries<br/>Keep raw tool payloads bounded and disposable<br/>Send each stage only its relevant state slice"]:::deterministic
   L3_D5["D5 · LangGraph is the runtime<br/>Why: explicit transitions, resume, interrupts, replay.<br/>Not chosen: one global while-true ReAct loop because<br/>termination and recovery become model-dependent."]:::decision
-  L3_D6["D6 · Checkpoint side effects, not every token<br/>Why: prevent duplicate queries/publications on restart.<br/>Not chosen now: Temporal because its operational<br/>weight is excessive for the single-user phase."]:::decision
+  L3_D6["D6 · Redis checkpoints side effects, not every token<br/>Why: resume safely, coordinate workers, and prevent<br/>duplicate queries/publications without token-by-token noise.<br/>Not chosen: Temporal yet because its operational weight<br/>is excessive for the single-user phase."]:::decision
+  L3_D6R["D6R · Structured compaction at the state boundary<br/>Why: preserve durable evidence without replaying huge<br/>prompts or raw tool payloads.<br/>Not chosen: unlimited transcript growth."]:::decision
   L3_LOAD --> L3_NORMALIZE --> L3_CLASSIFY --> L3_ROUTE
   L3_ROUTE -. updates .-> L3_STATE
   L3_STATE <--> L3_CHECKPOINT
+  L3_STATE --> L3_COMPACT --> L3_CHECKPOINT
   L3_D5 ~~~ L3_CLASSIFY
   L3_D6 ~~~ L3_CHECKPOINT
+  L3_D6R ~~~ L3_COMPACT
 end
 L3_OUT["HANDOFF 3<br/>Selected workflow route + durable AgentState"]:::handoff
 L2_OUT ==> L3_LOAD

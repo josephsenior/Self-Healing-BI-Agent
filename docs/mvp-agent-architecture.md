@@ -104,11 +104,18 @@ H7 --> LOCAL
 H7 --> FINAL
 UI2 --> USER
 
+
+subgraph S9["9. ARCHITECTURE DECISIONS"]
+  direction TB
+  DECISIONS["Why this approach?<br/><br/>1. Modular monolith instead of microservices: one local user and lower operational cost.<br/>2. Clean/Hexagonal ports instead of direct SDK calls: replaceable adapters and testability.<br/>3. One orchestrator instead of peer agents: fewer handoffs, lower cost, clearer debugging.<br/>4. Redis pool + dependency injection instead of Singleton: durable shared state without hidden global state.<br/>5. Deterministic services instead of LLM execution: security, limits, validation, and audit are reproducible.<br/>6. Local-first instead of cloud-first: harden BigQuery-to-Desktop workflow before Fabric administration."]:::note
+end
+UI2 --> S9
 BOUNDARY["Security boundary<br/>Credentials stay in local environment / OS store<br/>never in prompts, AgentState, PBIP files, or logs"]:::boundary
 MVP["MVP scope<br/>single user, local execution, one orchestrator<br/>Fabric publishing and multi-user identity are deferred"]:::note
 BOUNDARY -. applies to .-> BQ
 BOUNDARY -. applies to .-> REPORT
-MVP -. scope .-> TITLE```
+MVP -. scope .-> TITLE
+```
 
 The MVP is a **local-first modular monolith using Clean/Hexagonal Architecture with one bounded agent orchestrator**. Redis is an application-scoped infrastructure adapter, not a global Singleton. BigQuery access, Power BI artifact generation, and quality validation remain deterministic services.
 ## Architecture decisions

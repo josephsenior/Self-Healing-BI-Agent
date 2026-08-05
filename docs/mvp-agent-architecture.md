@@ -1,60 +1,116 @@
 # MVP local-first data-analysis agent
 
-This is the simplified architecture for the first reliable implementation. Read from top to bottom.
+This is the simplified execution view for the first reliable implementation. Follow the numbered stages from top to bottom. The orange handoffs are the only workflow path; side notes describe boundaries without adding execution branches.
 
 ```mermaid
-%%{init: {"flowchart": {"curve": "linear", "nodeSpacing": 45, "rankSpacing": 65}, "themeVariables": {"fontSize": "18px"}}}%%
+%%{init: {"flowchart": {"curve": "linear", "nodeSpacing": 30, "rankSpacing": 45}, "themeVariables": {"fontSize": "17px"}}}%%
 flowchart TB
 
-classDef user fill:#e8f1ff,stroke:#2563eb,color:#102a56,stroke-width:2px;
-classDef app fill:#ede9fe,stroke:#6d28d9,color:#2e1065,stroke-width:2px;
-classDef agent fill:#dbeafe,stroke:#1d4ed8,color:#172554,stroke-width:2px;
+classDef input fill:#e8f1ff,stroke:#2563eb,color:#102a56,stroke-width:2px;
+classDef control fill:#ede9fe,stroke:#6d28d9,color:#2e1065,stroke-width:2px;
+classDef reasoning fill:#dbeafe,stroke:#1d4ed8,color:#172554,stroke-width:2px;
 classDef service fill:#dcfce7,stroke:#15803d,color:#052e16,stroke-width:2px;
 classDef state fill:#f3e8ff,stroke:#7e22ce,color:#3b0764,stroke-width:2px;
-classDef external fill:#fff7ed,stroke:#c2410c,color:#431407,stroke-width:2px;
+classDef handoff fill:#fff7ed,stroke:#c2410c,color:#431407,stroke-width:2px;
 classDef output fill:#cffafe,stroke:#0e7490,color:#083344,stroke-width:2px;
-classDef security fill:#fee2e2,stroke:#b91c1c,color:#450a0a,stroke-width:2px;
+classDef boundary fill:#fee2e2,stroke:#b91c1c,color:#450a0a,stroke-width:2px;
+classDef note fill:#f8fafc,stroke:#64748b,color:#0f172a,stroke-dasharray:5 3;
 
-TITLE["MVP LOCAL-FIRST DATA ANALYSIS AGENT<br/>Single user · one orchestrator · reliable deterministic services"]:::app
+TITLE["MVP LOCAL-FIRST DATA-ANALYSIS AGENT<br/>One user - one orchestrator - deterministic execution"]:::control
 
-USER["Analyst<br/>Business question or dashboard request"]:::user
-UI["React / Next.js UI<br/>Chat · progress · approval · artifacts"]:::user
-API["FastAPI backend<br/>WebSocket · validation · cancellation"]:::app
-ORCH["One agent orchestrator<br/>LangGraph workflow<br/>bounded reasoning and tool selection"]:::agent
-STATE["AgentState in Redis<br/>checkpoint · compact context · run status<br/>one application-scoped connection pool"]:::state
+subgraph S1["1. INPUT"]
+  direction TB
+  USER["Analyst submits a question or dashboard request"]:::input
+  UI["React / Next.js console<br/>chat, progress, approval, artifacts"]:::input
+  USER --> UI
+end
+H1["HANDOFF 1<br/>Request text + run metadata"]:::handoff
+UI --> H1
 
-ANALYZE["Analysis stage<br/>understand question · select fields<br/>produce structured QueryPlan"]:::agent
-TOOLS["MCP tool boundary<br/>dynamic tool discovery and dispatch"]:::app
-BQ["BigQuery service<br/>read-only SQL · allowlist · dry run<br/>byte/row limits · QueryEvidence"]:::service
-PBI["Power BI services<br/>semantic catalog · PBIP/PBIR compiler<br/>Desktop open when explicitly requested"]:::service
-QA["Deterministic validation<br/>schema · fields · layout · evidence<br/>final admission decision"]:::service
-RESULT["Verified result<br/>answer · data evidence · local report artifact<br/>warnings and next safe action"]:::output
-CREDS["Local secret boundary<br/>Google ADC · Power BI credentials<br/>never placed in prompts or artifacts"]:::security
-BQAPI[("Google BigQuery API")]:::external
-DESKTOP[("Power BI Desktop")]:::external
+subgraph S2["2. BACKEND RUN SETUP"]
+  direction TB
+  API["FastAPI WebSocket endpoint<br/>validate input, create run_id, handle cancellation"]:::control
+  CTX["RunContext<br/>thread_id, provider, permissions, cancellation"]:::state
+  API --> CTX
+end
+H2["HANDOFF 2<br/>Validated request + isolated run context"]:::handoff
+H1 --> API
+CTX --> H2
 
-TITLE --> USER --> UI --> API --> ORCH
-ORCH <--> STATE
-ORCH --> ANALYZE --> TOOLS
-TOOLS --> BQ --> BQAPI
-BQ --> PBI
-PBI --> DESKTOP
-TOOLS --> QA
-ANALYZE --> QA
-QA -->|approved| RESULT
-QA -->|needs correction| ANALYZE
-API --> RESULT --> UI --> USER
-CREDS -. credentials only .-> BQ
-CREDS -. credentials only .-> PBI
+subgraph S3["3. DURABLE STATE"]
+  direction TB
+  REDIS["Redis adapter<br/>application-scoped connection pool<br/>checkpoint, compact context, run status, locks"]:::state
+  PORTS["Injected ports<br/>ContextStore, LockService, EventPublisher"]:::control
+  REDIS --> PORTS
+end
+H3["HANDOFF 3<br/>Recoverable state services available to the workflow"]:::handoff
+H2 --> REDIS
+PORTS --> H3
 
-MVP_RULE["MVP boundaries<br/>One user · one orchestrator · no peer agents<br/>Redis manages state, not reasoning<br/>BigQuery/Power BI actions stay deterministic<br/>Cloud publishing is outside this MVP"]:::security
-MVP_RULE -.-> ORCH
-MVP_RULE -.-> STATE
-```
+subgraph S4["4. AGENT ORCHESTRATION"]
+  direction TB
+  ORCH["Single agent orchestrator<br/>bounded workflow and tool selection"]:::reasoning
+  ANALYZE["Analysis stage<br/>understand intent, select fields, create structured QueryPlan"]:::reasoning
+  ORCH --> ANALYZE
+end
+H4["HANDOFF 4<br/>Structured QueryPlan"]:::handoff
+H3 --> ORCH
+ANALYZE --> H4
 
-The MVP deliberately uses one orchestrating agent. BigQuery access, Power BI artifact generation, and validation remain deterministic services. Redis stores checkpoints and compact structured context; it is created through an application-scoped connection pool and dependency injection, not a global Singleton.
+subgraph S5["5. DATA ACQUISITION"]
+  direction TB
+  MCP["MCP tool boundary<br/>discover tools and dispatch approved calls"]:::control
+  BQ["BigQuery read-only service<br/>allowlist, SQL preflight, dry run, byte/row limits"]:::service
+  EVIDENCE["QueryEvidence<br/>rows, columns, row_count, referenced tables, bytes"]:::state
+  MCP --> BQ --> EVIDENCE
+end
+H5["HANDOFF 5<br/>Evidence-backed data result"]:::handoff
+H4 --> MCP
+EVIDENCE --> H5
 
-The cloud publishing and multi-user identity branches can be added after this local workflow is stable.
+subgraph S6["6. OPTIONAL POWER BI ARTIFACT"]
+  direction TB
+  CHOICE["Does the user request a local dashboard artifact?"]:::control
+  CATALOG["Semantic catalog and BigQuery model binding"]:::service
+  REPORT["PBIP/PBIR compiler<br/>DashboardSpec to versioned local report"]:::service
+  ANSWER["Answer/data-only result"]:::output
+  CHOICE -->|yes| CATALOG --> REPORT
+  CHOICE -->|no| ANSWER
+end
+H6["HANDOFF 6<br/>Data answer or candidate report"]:::handoff
+H5 --> CHOICE
+REPORT --> H6
+ANSWER --> H6
+
+subgraph S7["7. DETERMINISTIC QUALITY GATE"]
+  direction TB
+  QA["Validation service<br/>schema, fields, layout, evidence, security"]:::service
+  ADMIT["Admission decision<br/>verified, verified with warnings, or needs review"]:::boundary
+  QA --> ADMIT
+end
+H7["HANDOFF 7<br/>Verified result and audit evidence"]:::handoff
+H6 --> QA
+ADMIT --> H7
+
+subgraph S8["8. DELIVERY"]
+  direction TB
+  LOCAL["If approved and requested:<br/>open the generated report in Power BI Desktop"]:::service
+  FINAL["Final response assembler<br/>answer, evidence, artifact path, warnings, next action"]:::output
+  UI2["React console displays the result"]:::input
+  LOCAL --> FINAL
+  FINAL --> UI2
+end
+H7 --> LOCAL
+H7 --> FINAL
+UI2 --> USER
+
+BOUNDARY["Security boundary<br/>Credentials stay in local environment / OS store<br/>never in prompts, AgentState, PBIP files, or logs"]:::boundary
+MVP["MVP scope<br/>single user, local execution, one orchestrator<br/>Fabric publishing and multi-user identity are deferred"]:::note
+BOUNDARY -. applies to .-> BQ
+BOUNDARY -. applies to .-> REPORT
+MVP -. scope .-> TITLE```
+
+The MVP is a **local-first modular monolith using Clean/Hexagonal Architecture with one bounded agent orchestrator**. Redis is an application-scoped infrastructure adapter, not a global Singleton. BigQuery access, Power BI artifact generation, and quality validation remain deterministic services.
 ## Architecture decisions
 
 ### D1 — Local-first modular monolith

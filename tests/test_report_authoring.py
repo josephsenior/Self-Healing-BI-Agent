@@ -50,6 +50,7 @@ class ReportAuthoringTests(unittest.TestCase):
             self.assertEqual(result.validation.visual_count, 2)
             report_root = Path(result.report_path)
             self.assertTrue((report_root / "definition.pbir").is_file())
+            self.assertTrue((report_root.parent / "Executive-Sales.pbip").is_file())
             inspected = inspect_pbir_project(report_root)
             self.assertEqual(inspected["pages"][0]["visual_count"], 2)
 
@@ -72,6 +73,35 @@ class ReportAuthoringTests(unittest.TestCase):
             ))
             visual = json.loads(visual_file.read_text(encoding="utf-8"))
             self.assertIn("queryState", visual["visual"]["query"])
+
+    def test_numeric_column_value_is_emitted_as_sum_aggregation(self) -> None:
+        spec = DashboardSpec.model_validate({
+            "title": "Aggregated Card",
+            "dataset": {"path": "../Sales.SemanticModel"},
+            "pages": [{
+                "name": "Overview",
+                "visuals": [{
+                    "type": "card",
+                    "title": "Total Revenue",
+                    "position": {"column": 0, "row": 0, "width": 4, "height": 2},
+                    "fields": {"value": [{
+                        "table": "Sales", "name": "Revenue", "kind": "column"
+                    }]},
+                }],
+            }],
+        })
+        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as root:
+            result = compile_report(spec, root)
+            visual_file = next(Path(result.report_path).glob(
+                "definition/pages/*/visuals/*/visual.json"
+            ))
+            visual = json.loads(visual_file.read_text(encoding="utf-8"))["visual"]
+            projection = visual["query"]["queryState"]["Data"]["projections"][0]
+
+            self.assertEqual(visual["visualType"], "cardVisual")
+            self.assertEqual(projection["field"]["Aggregation"]["Function"], 0)
+            self.assertEqual(projection["queryRef"], "Sum(Sales.Revenue)")
+            self.assertEqual(projection["nativeQueryRef"], "Sum of Revenue")
 
 
 class ExpandedVisualAuthoringTests(unittest.TestCase):
@@ -243,6 +273,7 @@ from backend.report_authoring.semantic import SemanticModelCatalog, validate_das
 from backend.report_authoring.cloud import (
     CloudConfig,
     FabricReportPublisher,
+    PowerBICloudClient,
     PowerBIExportRenderer,
     build_report_definition_parts,
 )
@@ -251,6 +282,7 @@ from backend.report_authoring.visual_review import (
     decide_visual_qa_iteration,
 )
 from backend.report_authoring.desktop import (
+    ensure_staging_semantic_model,
     open_report_in_powerbi_desktop,
     prepare_report_for_desktop,
 )
@@ -298,6 +330,60 @@ class _StaticTokens:
 
 
 class CloudVisualQATests(unittest.TestCase):
+    def test_cloud_client_lists_models_builds_catalog_and_executes_dax(self) -> None:
+        model = {
+            "model": {"tables": [{
+                "name": "Sales",
+                "columns": [{"name": "Region", "dataType": "string"}],
+                "measures": [{"name": "Revenue", "dataType": "decimal"}],
+            }]}
+        }
+        encoded_model = base64.b64encode(json.dumps(model).encode()).decode()
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.method == "GET" and request.url.path.endswith("/semanticModels"):
+                return httpx.Response(200, json={"value": [{
+                    "id": "model-1", "displayName": "Sales Model"
+                }]})
+            if request.url.path.endswith("/getDefinition"):
+                return httpx.Response(200, json={"definition": {"parts": [{
+                    "path": "model.bim", "payload": encoded_model
+                }]}})
+            if request.url.path.endswith("/executeQueries"):
+                return httpx.Response(200, json={"results": [{"tables": [{
+                    "rows": [{"[Revenue]": 42}]
+                }]}]})
+            return httpx.Response(404)
+
+        client = PowerBICloudClient(
+            CloudConfig(workspace_id="workspace-1"),
+            _StaticTokens(),
+            httpx.Client(transport=httpx.MockTransport(handler)),
+        )
+        self.assertEqual(client.list_semantic_models()[0]["id"], "model-1")
+        catalog = client.semantic_catalog("model-1")
+        self.assertEqual(catalog.tables[0].columns[0].name, "Region")
+        self.assertEqual(catalog.tables[0].measures[0].name, "Revenue")
+        result = client.execute_dax("model-1", "EVALUATE ROW(\"Revenue\", 42)")
+        self.assertEqual(result["results"][0]["tables"][0]["rows"][0]["[Revenue]"], 42)
+
+    def test_cloud_client_rejects_non_query_dax(self) -> None:
+        client = PowerBICloudClient(CloudConfig(workspace_id="workspace-1"), _StaticTokens())
+        with self.assertRaisesRegex(ValueError, "must begin"):
+            client.execute_dax("model-1", "DROP TABLE Sales")
+
+    def test_pro_mode_supports_publication_but_rejects_png_export(self) -> None:
+        config = CloudConfig(workspace_id="workspace-1", license_mode="pro")
+        self.assertFalse(config.supports_export_to_file)
+        renderer = PowerBIExportRenderer(config, _StaticTokens())
+        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as root:
+            with self.assertRaisesRegex(ValueError, "ExportToFile API requires"):
+                renderer.render_report("report-1", root)
+
+    def test_capacity_mode_supports_png_export(self) -> None:
+        config = CloudConfig(workspace_id="workspace-1", license_mode="capacity")
+        self.assertTrue(config.supports_export_to_file)
+
     def test_definition_parts_rebind_local_semantic_model(self) -> None:
         with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as root:
             result = compile_report(sample_spec(), root)
@@ -380,6 +466,38 @@ class CloudVisualQATests(unittest.TestCase):
 
 
 class DesktopVisualHandoffTests(unittest.TestCase):
+    def test_staging_model_uses_supported_schema_and_contains_data(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as root:
+            model = ensure_staging_semantic_model(root, sample_spec())
+            definition = json.loads(
+                (model / "definition.pbism").read_text(encoding="utf-8")
+            )
+            payload = json.loads((model / "model.bim").read_text(encoding="utf-8"))
+
+            self.assertEqual(
+                definition["$schema"],
+                "https://developer.microsoft.com/json-schemas/fabric/item/"
+                "semanticModel/definitionProperties/1.0.0/schema.json",
+            )
+            self.assertEqual(definition["version"], "4.2")
+            self.assertEqual(payload["compatibilityLevel"], 1600)
+            tables = {table["name"]: table for table in payload["model"]["tables"]}
+            self.assertEqual(
+                {column["name"] for column in tables["Sales"]["columns"]},
+                {"__Revenue_Value"},
+            )
+            self.assertEqual(
+                {measure["name"] for measure in tables["Sales"]["measures"]},
+                {"Revenue"},
+            )
+            self.assertEqual(
+                {column["name"] for column in tables["Date"]["columns"]},
+                {"Month"},
+            )
+            self.assertIn("#table", "\n".join(
+                tables["Sales"]["partitions"][0]["source"]["expression"]
+            ))
+
     def test_prepares_staged_report_for_real_desktop_rendering(self) -> None:
         with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as root_value:
             root = Path(root_value)
@@ -402,7 +520,7 @@ class DesktopVisualHandoffTests(unittest.TestCase):
             with patch("backend.report_authoring.desktop.os.startfile") as startfile:
                 opened = open_report_in_powerbi_desktop(compiled.report_path)
             startfile.assert_called_once_with(opened)
-            self.assertTrue(opened.endswith("definition.pbir"))
+            self.assertTrue(opened.endswith("Executive-Sales.pbip"))
 
 
 class StatefulDashboardWorkspaceTests(unittest.TestCase):
@@ -575,10 +693,21 @@ class StatefulDashboardWorkspaceTests(unittest.TestCase):
             root = Path(root_value)
             manager = DashboardWorkspaceManager(root / "workspaces")
             created = manager.create(sample_spec(), semantic_model_path=None)
-            with patch("backend.report_authoring.desktop.os.startfile"):
+            refresh_result = {
+                "processed": True,
+                "verification_table": "Sales",
+                "row_count": 6,
+            }
+            with patch(
+                "backend.report_authoring.workspace."
+                "open_and_refresh_report_in_powerbi_desktop",
+                return_value=("definition.pbir", refresh_result),
+            ) as open_and_refresh:
                 opened = manager.open_active_in_desktop()
             self.assertTrue(opened["opened"])
             self.assertTrue("Staging.SemanticModel" in opened["semantic_model_path"])
+            self.assertEqual(opened["model_refresh"]["row_count"], 6)
+            open_and_refresh.assert_called_once()
 
 if __name__ == "__main__":
     unittest.main()

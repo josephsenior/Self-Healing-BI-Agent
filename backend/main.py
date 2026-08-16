@@ -2,10 +2,12 @@ import json
 import logging
 import asyncio
 import os
+import uuid
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from backend.infrastructure.redis_state import AgentStateRuntime
 
 
 from backend.agent import (
@@ -41,7 +43,7 @@ app.add_middleware(
 @app.on_event("startup")
 async def log_startup_config():
     """Log the active configuration at startup (secrets are masked)."""
-    logger.info("=== Power BI MCP Agent — Starting Up ===")
+    logger.info("=== Power BI MCP Agent â€” Starting Up ===")
     logger.info(f"  LLM Provider   : {config.llm_provider}")
     logger.info(f"  LLM Model      : {config.llm_model}")
     logger.info(f"  Transport Mode : {config.transport_mode}")
@@ -50,6 +52,14 @@ async def log_startup_config():
     else:
         logger.info(f"  STDIO Command  : {config.stdio_command}")
     logger.info("========================================")
+    state_runtime = AgentStateRuntime(
+        config.redis_url,
+        required=config.redis_required,
+        checkpoint_ttl_minutes=config.redis_checkpoint_ttl_minutes,
+    )
+    await state_runtime.start()
+    app.state.agent_state_runtime = state_runtime
+    logger.info("  State Backend  : %s", state_runtime.backend)
 
 # ==============================================================================
 # REST ENDPOINTS
@@ -62,7 +72,15 @@ async def health_check():
         "llm_provider": config.llm_provider,
         "llm_model": config.llm_model,
         "transport_mode": config.transport_mode,
+        "state": app.state.agent_state_runtime.health(),
     }
+
+@app.on_event("shutdown")
+async def close_application_resources():
+    """Close application-scoped pools explicitly."""
+    runtime = getattr(app.state, "agent_state_runtime", None)
+    if runtime is not None:
+        await runtime.close()
 
 @app.get("/api/config")
 async def get_config():
@@ -71,6 +89,7 @@ async def get_config():
         "llm_provider": config.llm_provider,
         "llm_model": config.llm_model,
         "transport_mode": config.transport_mode,
+        "state": app.state.agent_state_runtime.health(),
         "sse_url": config.sse_url if config.transport_mode.upper() == "SSE" else None,
     }
 
@@ -99,6 +118,7 @@ async def update_config(req: ConfigUpdateRequest):
         "llm_provider": config.llm_provider,
         "llm_model": config.llm_model,
         "transport_mode": config.transport_mode,
+        "state": app.state.agent_state_runtime.health(),
         "sse_url": config.sse_url if config.transport_mode.upper() == "SSE" else None,
     }
 
@@ -127,6 +147,8 @@ async def websocket_chat(websocket: WebSocket):
     coordinator.set_send_callback(send_payload)
 
     agent_task = None
+    default_thread_id = str(uuid.uuid4())
+    state_runtime: AgentStateRuntime = websocket.app.state.agent_state_runtime
 
     try:
         await websocket.send_json({"type": "status", "status": "starting_agent"})
@@ -139,20 +161,22 @@ async def websocket_chat(websocket: WebSocket):
             await websocket.send_json({"type": "tools_discovered", "tools": tool_names, "count": len(tool_names)})
             await websocket.send_json({"type": "status", "status": "mcp_connected"})
 
-            # Maintain conversation history for the entire WebSocket lifecycle
-            conversation_history = []
+            await websocket.send_json({"type": "thread_ready", "threadId": default_thread_id})
 
-            async def execute_agent(query_text: str, reasoning_effort: str = None):
+            async def execute_agent(query_text: str, thread_id: str, reasoning_effort: str = None):
                 try:
                     await websocket.send_json({"type": "status", "status": "running"})
-                    # Run the LLM/Agent tool loop
-                    async for event in run_agent_loop(
-                        query_text,
-                        session,
-                        history=conversation_history,
-                        reasoning_effort=reasoning_effort
-                    ):
-                        await websocket.send_json(event)
+                    run_id = str(uuid.uuid4())
+                    async with state_runtime.run_lock(thread_id):
+                        async for event in run_agent_loop(
+                            query_text,
+                            session,
+                            reasoning_effort=reasoning_effort,
+                            thread_id=thread_id,
+                            run_id=run_id,
+                            checkpointer=state_runtime.checkpointer,
+                        ):
+                            await websocket.send_json(event)
                     await websocket.send_json({"type": "complete"})
                 except asyncio.CancelledError:
                     logger.info("Agent task was cancelled by client.")
@@ -176,6 +200,10 @@ async def websocket_chat(websocket: WebSocket):
                 if msg_type == "query":
                     query_text = message.get("text")
                     reasoning_effort = message.get("reasoningEffort")
+                    thread_id = str(message.get("threadId") or default_thread_id)
+                    if not query_text or len(thread_id) > 128:
+                        await websocket.send_json({"type": "error", "message": "Invalid query or threadId"})
+                        continue
                     # Cancel existing run if it's currently active
                     if agent_task and not agent_task.done():
                         logger.info("Aborting active agent run to start new query.")
@@ -184,7 +212,7 @@ async def websocket_chat(websocket: WebSocket):
                         await asyncio.sleep(0.1)
 
                     # Spawn new asynchronous agent run task
-                    agent_task = asyncio.create_task(execute_agent(query_text, reasoning_effort=reasoning_effort))
+                    agent_task = asyncio.create_task(execute_agent(query_text, thread_id, reasoning_effort=reasoning_effort))
 
                 elif msg_type == "elicitation_response":
                     elicit_id = message.get("id")

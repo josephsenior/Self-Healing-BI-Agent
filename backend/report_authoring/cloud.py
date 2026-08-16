@@ -14,6 +14,7 @@ from dotenv import load_dotenv
 
 from .pbir import _report_root
 from .preview import RenderResult
+from .semantic import CatalogField, CatalogTable, SemanticModelCatalog
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -36,6 +37,7 @@ class CloudAPIError(RuntimeError):
 @dataclass(frozen=True)
 class CloudConfig:
     workspace_id: str
+    license_mode: str = "capacity"
     tenant_id: str = ""
     client_id: str = ""
     client_secret: str = ""
@@ -53,6 +55,7 @@ class CloudConfig:
             )
         return cls(
             workspace_id=workspace_id,
+            license_mode=os.getenv("POWERBI_CLOUD_LICENSE_MODE", "capacity").strip().lower(),
             tenant_id=os.getenv("AZURE_TENANT_ID", "").strip(),
             client_id=os.getenv("AZURE_CLIENT_ID", "").strip(),
             client_secret=os.getenv("AZURE_CLIENT_SECRET", "").strip(),
@@ -61,6 +64,11 @@ class CloudConfig:
             timeout_seconds=float(os.getenv("POWERBI_CLOUD_TIMEOUT_SECONDS", "300")),
             poll_interval_seconds=float(os.getenv("POWERBI_CLOUD_POLL_SECONDS", "2")),
         )
+
+    @property
+    def supports_export_to_file(self) -> bool:
+        """Whether the configured workspace licensing can use Power BI ExportToFile."""
+        return self.license_mode in {"capacity", "fabric", "premium", "embedded"}
 
 
 class EntraTokenProvider:
@@ -203,16 +211,23 @@ class FabricReportPublisher:
             "Content-Type": "application/json",
         }
 
-    def _complete_lro(self, response: httpx.Response) -> tuple[dict[str, Any], str | None]:
+    def _complete_lro(
+        self,
+        response: httpx.Response,
+        *,
+        expect_result: bool = True,
+    ) -> tuple[dict[str, Any], str | None]:
         if response.status_code != 202:
             return _response_json(response), None
+        location = response.headers.get("Location", "").rstrip("/")
         operation_id = response.headers.get("x-ms-operation-id")
         if not operation_id:
-            location = response.headers.get("Location", "").rstrip("/")
             operation_id = location.rsplit("/", 1)[-1] if location else ""
         if not operation_id:
             raise CloudAPIError("Fabric returned 202 without an operation identifier")
-        state_url = f"{FABRIC_API}/operations/{operation_id}"
+        # Fabric can return a regional Analysis Services operation URL. Using
+        # that Location avoids slow or stuck polling through the global API.
+        state_url = location or f"{FABRIC_API}/operations/{operation_id}"
         deadline = time.monotonic() + self.config.timeout_seconds
         while time.monotonic() < deadline:
             state_response = self.client.get(state_url, headers=self._headers())
@@ -220,6 +235,8 @@ class FabricReportPublisher:
             state = _response_json(state_response)
             status = state.get("status")
             if status == "Succeeded":
+                if not expect_result:
+                    return {}, operation_id
                 result_response = self.client.get(
                     f"{state_url}/result", headers=self._headers()
                 )
@@ -249,7 +266,7 @@ class FabricReportPublisher:
                 url, headers=self._headers(), json={"definition": definition}
             )
             _ensure_success(response, "update Fabric report")
-            _, operation_id = self._complete_lro(response)
+            _, operation_id = self._complete_lro(response, expect_result=False)
             return PublishResult(
                 action="updated",
                 workspace_id=self.config.workspace_id,
@@ -278,6 +295,125 @@ class FabricReportPublisher:
         )
 
 
+class PowerBICloudClient:
+    """Capacity-independent Power BI cloud metadata and DAX operations."""
+
+    def __init__(
+        self,
+        config: CloudConfig,
+        token_provider: EntraTokenProvider | None = None,
+        client: httpx.Client | None = None,
+        sleep: Callable[[float], None] = time.sleep,
+    ):
+        self.config = config
+        self.tokens = token_provider or EntraTokenProvider(config)
+        self.client = client or httpx.Client(timeout=config.timeout_seconds)
+        self.sleep = sleep
+
+    def _headers(self, scope: str) -> dict[str, str]:
+        return {
+            "Authorization": f"Bearer {self.tokens.token_for(scope)}",
+            "Content-Type": "application/json",
+        }
+
+    def _complete_definition(self, response: httpx.Response) -> dict[str, Any]:
+        if response.status_code != 202:
+            return _response_json(response)
+        location = response.headers.get("Location", "").rstrip("/")
+        operation_id = response.headers.get("x-ms-operation-id", "")
+        if not operation_id:
+            operation_id = location.rsplit("/", 1)[-1] if location else ""
+        if not operation_id:
+            raise CloudAPIError("semantic-model definition returned no operation id")
+        operation_url = location or f"{FABRIC_API}/operations/{operation_id}"
+        deadline = time.monotonic() + self.config.timeout_seconds
+        while time.monotonic() < deadline:
+            state_response = self.client.get(
+                operation_url, headers=self._headers(FABRIC_SCOPE)
+            )
+            _ensure_success(state_response, "poll semantic-model definition")
+            state = _response_json(state_response)
+            if state.get("status") == "Succeeded":
+                result_response = self.client.get(
+                    f"{operation_url}/result", headers=self._headers(FABRIC_SCOPE)
+                )
+                _ensure_success(result_response, "get semantic-model definition result")
+                return _response_json(result_response)
+            if state.get("status") in {"Failed", "Cancelled"}:
+                raise CloudAPIError(
+                    f"semantic-model definition operation ended with {state.get('status')}"
+                )
+            self.sleep(_safe_retry_after(state_response, self.config.poll_interval_seconds))
+        raise TimeoutError("semantic-model definition exceeded the configured timeout")
+
+    def list_semantic_models(self) -> list[dict[str, Any]]:
+        url = f"{FABRIC_API}/workspaces/{self.config.workspace_id}/semanticModels"
+        models: list[dict[str, Any]] = []
+        while url:
+            response = self.client.get(url, headers=self._headers(FABRIC_SCOPE))
+            _ensure_success(response, "list Power BI semantic models")
+            payload = _response_json(response)
+            models.extend(payload.get("value", []))
+            url = str(payload.get("continuationUri") or "")
+        return models
+
+    def semantic_catalog(self, semantic_model_id: str) -> SemanticModelCatalog:
+        response = self.client.post(
+            f"{FABRIC_API}/workspaces/{self.config.workspace_id}/semanticModels/"
+            f"{semantic_model_id}/getDefinition?format=TMSL",
+            headers=self._headers(FABRIC_SCOPE),
+        )
+        _ensure_success(response, "get Power BI semantic-model definition")
+        payload = self._complete_definition(response)
+        parts = payload.get("definition", {}).get("parts", [])
+        model_part = next(
+            (part for part in parts if part.get("path") == "model.bim"), None
+        )
+        if not model_part or not model_part.get("payload"):
+            raise CloudAPIError("semantic-model definition did not contain model.bim")
+        try:
+            model = json.loads(base64.b64decode(model_part["payload"]).decode("utf-8"))
+        except (ValueError, UnicodeDecodeError) as exc:
+            raise CloudAPIError("semantic-model model.bim payload is invalid") from exc
+        catalog_tables: list[CatalogTable] = []
+        for table in model.get("model", {}).get("tables", []):
+            catalog_tables.append(CatalogTable(
+                name=str(table.get("name", "")),
+                columns=[CatalogField(
+                    name=str(column.get("name", "")),
+                    data_type=str(column.get("dataType", "unknown")),
+                    hidden=bool(column.get("isHidden", False)),
+                ) for column in table.get("columns", []) if column.get("name")],
+                measures=[CatalogField(
+                    name=str(measure.get("name", "")),
+                    data_type=str(measure.get("dataType", "unknown")),
+                    hidden=bool(measure.get("isHidden", False)),
+                ) for measure in table.get("measures", []) if measure.get("name")],
+            ))
+        return SemanticModelCatalog(tables=catalog_tables)
+
+    def execute_dax(
+        self,
+        semantic_model_id: str,
+        query: str,
+        include_nulls: bool = True,
+    ) -> dict[str, Any]:
+        normalized = query.lstrip().upper()
+        if not normalized.startswith(("EVALUATE", "DEFINE")):
+            raise ValueError("DAX query must begin with EVALUATE or DEFINE")
+        response = self.client.post(
+            f"{POWERBI_API}/groups/{self.config.workspace_id}/datasets/"
+            f"{semantic_model_id}/executeQueries",
+            headers=self._headers(POWERBI_SCOPE),
+            json={
+                "queries": [{"query": query}],
+                "serializerSettings": {"includeNulls": include_nulls},
+            },
+        )
+        _ensure_success(response, "execute Power BI DAX query")
+        return _response_json(response)
+
+
 class PowerBIExportRenderer:
     def __init__(
         self,
@@ -304,6 +440,14 @@ class PowerBIExportRenderer:
         page_names: list[str] | None = None,
         locale: str = "en-US",
     ) -> RenderResult:
+        if not self.config.supports_export_to_file:
+            raise CloudConfigurationError(
+                "Power BI PNG export is unavailable in POWERBI_CLOUD_LICENSE_MODE="
+                f"{self.config.license_mode!r}. Power BI Pro and PPU workspaces can "
+                "publish reports but the ExportToFile API requires a Fabric, Premium, "
+                "or Embedded capacity. Publication remains available; inspect the report "
+                "manually in the Power BI service or configure a capacity-backed workspace."
+            )
         output = Path(output_path).resolve()
         output.mkdir(parents=True, exist_ok=True)
         base_url = (

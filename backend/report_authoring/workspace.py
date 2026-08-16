@@ -13,6 +13,7 @@ from typing import Any
 from .compiler import CompilationResult, compile_report
 from .desktop import (
     ensure_staging_semantic_model,
+    open_and_refresh_report_in_powerbi_desktop,
     open_report_in_powerbi_desktop,
     prepare_report_for_desktop,
 )
@@ -374,7 +375,9 @@ class DashboardWorkspaceManager:
 
         if build is not None:
             if not semantic_model_path:
-                semantic_model_path = str(ensure_staging_semantic_model(self._dashboard_root(dashboard_id)))
+                semantic_model_path = str(
+                    ensure_staging_semantic_model(self._dashboard_root(dashboard_id), spec)
+                )
             try:
                 handoff = prepare_report_for_desktop(report_path, semantic_model_path)
                 pbir_path = handoff.pbir_path
@@ -723,11 +726,35 @@ class DashboardWorkspaceManager:
         state = self.get(selected_id)
         record = state["dashboard"]
         current = state["current"]
+        spec = DashboardSpec.model_validate(current["spec"])
         model_path = semantic_model_path or record.get("semantic_model_path")
-        if not model_path:
-            model_path = str(ensure_staging_semantic_model(self._dashboard_root(selected_id)))
+        staging_path = self._dashboard_root(selected_id) / "Staging.SemanticModel"
+        using_staging_model = (
+            not model_path or Path(model_path).resolve() == staging_path.resolve()
+        )
+        if using_staging_model:
+            model_path = str(ensure_staging_semantic_model(
+                self._dashboard_root(selected_id),
+                spec,
+            ))
         handoff = prepare_report_for_desktop(current["report_path"], model_path)
-        opened = open_report_in_powerbi_desktop(handoff.report_path)
+        refresh = None
+        if using_staging_model:
+            referenced_tables = [
+                field.table
+                for page in spec.pages
+                for visual in page.visuals
+                for fields in visual.resolved_fields().values()
+                for field in fields
+            ]
+            if not referenced_tables:
+                raise ValueError("cannot verify a staging model with no referenced tables")
+            opened, refresh = open_and_refresh_report_in_powerbi_desktop(
+                handoff.report_path,
+                referenced_tables[0],
+            )
+        else:
+            opened = open_report_in_powerbi_desktop(handoff.report_path)
         if model_path != record.get("semantic_model_path"):
             record["semantic_model_path"] = handoff.semantic_model_path
             record["updated_at"] = _utc_now()
@@ -738,4 +765,5 @@ class DashboardWorkspaceManager:
             "opened": True,
             "pbir_path": opened,
             "semantic_model_path": handoff.semantic_model_path,
+            "model_refresh": refresh,
         }

@@ -127,9 +127,10 @@ function getOperation(args: JsonRecord): string | null {
 }
 
 function classifyTool(name: string): ToolKind {
-  if (name === "dax_query_operations") return "query";
+  if (name === "dax_query_operations" || name === "bigquery_query") return "query";
   if (name === "format_dax" || name === "run_python_sandbox") return "code";
   if (name === "connection_operations") return "connection";
+  if (["bigquery_list_tables", "bigquery_get_table_schema", "bigquery_semantic_catalog", "bigquery_create_powerbi_semantic_model"].includes(name)) return "model";
   if (OPERATION_TOOLS[name]) return "model";
   if (name.includes("validate") || name.includes("quality") || name.includes("readiness") || name === "audit_active_dashboard") return "validation";
   if (name.includes("dashboard") || name === "stage_pbir_report" || name === "inspect_pbir_report" || name === "preview_pbir_report") return "workspace";
@@ -171,6 +172,12 @@ function getTheme(name: string): ToolTheme {
     render_powerbi_report: { label: "Render report", icon: <ImageIcon className="size-4" /> },
     review_powerbi_render: { label: "Visual review", icon: <Sparkles className="size-4" /> },
     decide_powerbi_visual_qa_iteration: { label: "QA decision", icon: <RefreshCw className="size-4" /> },
+    bigquery_list_tables: { label: "Discover BigQuery tables", icon: <Database className="size-4" /> },
+    bigquery_get_table_schema: { label: "Inspect BigQuery schema", icon: <Table2 className="size-4" /> },
+    bigquery_query: { label: "Analyze BigQuery data", icon: <Sigma className="size-4" /> },
+    bigquery_semantic_catalog: { label: "Build semantic catalog", icon: <Layers3 className="size-4" /> },
+    bigquery_create_powerbi_semantic_model: { label: "Create Power BI model", icon: <Database className="size-4" /> },
+    list_powerbi_visual_capabilities: { label: "Select Power BI visuals", icon: <BarChart2 className="size-4" /> },
   };
   return { ...base, ...(definitions[name] ?? { label: titleCase(name), icon: <Settings2 className="size-4" /> }) };
 }
@@ -180,16 +187,46 @@ function getActionSummary(toolCall: ToolCall, data: unknown): string {
   if (op) return titleCase(op);
   const args = toolCall.arguments;
   const result = asRecord(data);
+  const complete = toolCall.status === "complete" || toolCall.result !== undefined;
+  const table = String(args.table ?? result?.table ?? "the selected table");
+  if (toolCall.name === "bigquery_list_tables") {
+    const tables = Array.isArray(result?.tables) ? result.tables : [];
+    return complete ? `Found ${tables.length} table${tables.length === 1 ? "" : "s"} in ${String(args.dataset ?? "the dataset")}` : `Discovering tables in ${String(args.dataset ?? "the dataset")}`;
+  }
+  if (toolCall.name === "bigquery_get_table_schema") {
+    const fields = Array.isArray(result?.fields) ? result.fields : [];
+    return complete ? `Mapped ${fields.length} columns from ${table}` : `Reading columns and data types from ${table}`;
+  }
+  if (toolCall.name === "bigquery_query") {
+    const sql = String(args.sql ?? "").toLowerCase();
+    const dimensions = ["country", "product", "channel"].filter((name) => sql.includes(name));
+    const intent = sql.includes("date_trunc") || sql.includes("extract(month")
+      ? "Calculating the monthly performance trend"
+      : dimensions.length
+        ? `Comparing performance by ${dimensions.join(" and ")}`
+        : "Calculating headline business metrics";
+    return complete ? `${intent} · ${Number(result?.row_count ?? 0)} rows returned` : intent;
+  }
+  if (toolCall.name === "bigquery_semantic_catalog") return complete ? `Catalogued fields from ${table} for report authoring` : `Preparing report-safe fields from ${table}`;
+  if (toolCall.name === "bigquery_create_powerbi_semantic_model") return complete ? `Power BI ${String(result?.storage_mode ?? args.storage_mode ?? "")} model created from ${table}` : `Creating a ${String(args.storage_mode ?? "directQuery")} model from ${table}`;
+  if (toolCall.name === "list_powerbi_visual_capabilities") return complete ? "Matched the plan to supported Power BI visuals" : "Checking supported visuals and their field roles";
+  if (toolCall.name === "validate_dashboard_spec") return complete ? "Checked page layout, sizing, and visual placement" : "Checking page layout, sizing, and visual placement";
+  if (toolCall.name === "validate_dashboard_semantics") return complete ? "Checked every visual field against the current model" : "Verifying visual fields against the current model";
+  if (toolCall.name === "evaluate_dashboard_quality") return complete ? "Reviewed dashboard density and readability" : "Reviewing dashboard density and readability";
+  if (toolCall.name === "create_dashboard_workspace") return complete ? `Created ${String(result?.dashboard_id ?? args.dashboard_id ?? "the dashboard")}` : `Building and validating ${String(args.dashboard_id ?? "the dashboard")}`;
+  if (toolCall.name === "audit_active_dashboard") return complete ? "Audited the active report and collected findings" : "Auditing the active report for layout and model issues";
+  if (toolCall.name === "revise_active_dashboard") return complete ? `Saved a validated revision${result?.version ? ` as version ${String(result.version)}` : ""}` : `Applying a validated revision: ${String(args.reason ?? "requested improvements")}`;
   const candidate = args.display_name ?? args.dashboard_id ?? args.project_path ?? result?.dashboard_id ?? result?.display_name;
   if (typeof candidate === "string" && candidate) return candidate;
   if (toolCall.name === "run_python_sandbox") return "Execute analysis code";
   if (toolCall.name === "format_dax") return "Format expression";
-  return toolCall.result ? "Completed" : "In progress";
+  return complete ? `Finished ${getTheme(toolCall.name).label.toLowerCase()}` : `Working on ${getTheme(toolCall.name).label.toLowerCase()}`;
 }
 
 function Status({ toolCall }: { toolCall: ToolCall }) {
-  if (toolCall.error) return <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-red-700"><XCircle className="size-3" /> Failed</span>;
-  if (toolCall.result) return <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-700"><CheckCircle2 className="size-3" /> Complete</span>;
+  if (toolCall.status === "cancelled") return <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-amber-700"><XCircle className="size-3" /> Interrupted</span>;
+  if (toolCall.status === "failed" || toolCall.error) return <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-red-700"><XCircle className="size-3" /> Failed</span>;
+  if (toolCall.status === "complete" || toolCall.result !== undefined) return <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-700"><CheckCircle2 className="size-3" /> Complete</span>;
   return <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-zinc-500"><Clock3 className="size-3 animate-spin" /> Running</span>;
 }
 
@@ -339,7 +376,7 @@ function RelationshipPanel({ data }: { data: unknown }) {
 }
 
 function EntityList({ data }: { data: unknown[] }) {
-  return <div className="max-h-60 overflow-auto rounded-xl border border-violet-200 bg-white divide-y divide-zinc-100">{data.map((entry, index) => { const item = asRecord(entry); return <div key={index} className="flex items-center justify-between gap-3 px-3 py-2 hover:bg-violet-50/50"><div className="min-w-0"><p className="truncate font-mono text-[11px] font-semibold text-zinc-800">{formatValue(item?.name ?? item?.tableName ?? entry)}</p>{item?.description ? <p className="truncate text-[9px] text-zinc-400">{String(item.description)}</p> : null}</div>{item?.dataType ? <span className="rounded bg-violet-100 px-1.5 py-0.5 font-mono text-[9px] text-violet-700">{String(item.dataType)}</span> : null}</div>; })}</div>;
+  return <div className="max-h-60 overflow-auto rounded-xl border border-violet-200 bg-white divide-y divide-zinc-100">{data.map((entry, index) => { const item = asRecord(entry); return <div key={index} className="flex items-center justify-between gap-3 px-3 py-2 hover:bg-violet-50/50"><div className="min-w-0"><p className="truncate font-mono text-[11px] font-semibold text-zinc-800">{formatValue(item?.name ?? item?.tableName ?? item?.table ?? entry)}</p>{item?.description ? <p className="truncate text-[9px] text-zinc-400">{String(item.description)}</p> : null}</div>{item?.dataType ?? item?.type ? <span className="rounded bg-violet-100 px-1.5 py-0.5 font-mono text-[9px] text-violet-700">{String(item.dataType ?? item.type)}</span> : null}</div>; })}</div>;
 }
 
 function ArtifactPanel({ data }: { data: unknown }) {
@@ -375,6 +412,23 @@ function ToolBody({ toolCall, data, theme }: { toolCall: ToolCall; data: unknown
   }
   if (toolCall.name === "run_python_sandbox") return <CodePanel code={String(toolCall.arguments.code ?? "")} language="Python" output={typeof data === "string" ? data : JSON.stringify(data, null, 2)} />;
   if (toolCall.name === "format_dax") return <CodePanel code={typeof data === "string" ? data : String(toolCall.arguments.dax_code ?? "")} language="DAX" />;
+  if (toolCall.name === "bigquery_list_tables") {
+    const record = asRecord(data);
+    return <EntityList data={Array.isArray(record?.tables) ? record.tables : []} />;
+  }
+  if (toolCall.name === "bigquery_get_table_schema") {
+    const record = asRecord(data);
+    return <EntityList data={Array.isArray(record?.fields) ? record.fields : []} />;
+  }
+  if (toolCall.name === "bigquery_semantic_catalog") {
+    const record = asRecord(data);
+    const tables = Array.isArray(record?.tables) ? record.tables : [];
+    const fields = tables.reduce((count, table) => {
+      const item = asRecord(table);
+      return count + (Array.isArray(item?.columns) ? item.columns.length : 0) + (Array.isArray(item?.measures) ? item.measures.length : 0);
+    }, 0);
+    return <div className="grid grid-cols-2 gap-2"><Stat label="Tables" value={tables.length} /><Stat label="Report fields" value={fields} /></div>;
+  }
   if (theme.kind === "validation") return <ValidationPanel data={data} />;
   if (theme.kind === "connection") return <ConnectionPanel data={data} />;
   if (toolCall.name === "list_dashboard_versions" && Array.isArray(data)) return <VersionTimeline versions={data} />;
@@ -403,7 +457,7 @@ export function ToolCallCard({ toolCall }: ToolCallCardProps) {
   const data = useMemo(() => parseResult(toolCall.result), [toolCall.result]);
   const theme = getTheme(toolCall.name);
   const action = getActionSummary(toolCall, data);
-  const isRunning = !toolCall.result && !toolCall.error;
+  const isRunning = toolCall.status === "running" || (toolCall.status === undefined && toolCall.result === undefined && !toolCall.error);
 
   return (
     <article className={`relative overflow-hidden rounded-2xl border bg-white shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_24px_rgba(0,0,0,0.035)] ${toolCall.error ? "border-red-200" : theme.borderClass}`}>
@@ -416,7 +470,7 @@ export function ToolCallCard({ toolCall }: ToolCallCardProps) {
 
       {isRunning && <div className="px-4 pb-3"><div className={`relative h-1 overflow-hidden rounded-full ${theme.softClass}`}><span className="absolute inset-y-0 w-1/3 animate-[tool-progress_1.4s_ease-in-out_infinite] rounded-full" style={{ backgroundColor: theme.accent }} /></div></div>}
       {toolCall.error && <div className="px-4 pb-3"><div className="flex gap-2.5 rounded-xl border border-red-200 bg-red-50 p-3"><AlertCircle className="mt-0.5 size-4 shrink-0 text-red-600" /><div><p className="text-[10px] font-bold uppercase tracking-wider text-red-700">Tool failed</p><pre className="mt-1 whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-red-800">{toolCall.error}</pre></div></div></div>}
-      {toolCall.result && !toolCall.error && <div className="px-4 pb-4"><ToolBody toolCall={toolCall} data={data} theme={theme} /></div>}
+      {(toolCall.status === "complete" || toolCall.result !== undefined) && !toolCall.error && <div className="px-4 pb-4"><ToolBody toolCall={toolCall} data={data} theme={theme} /></div>}
 
       {expanded && <div className="border-t border-zinc-100 bg-zinc-50/80 px-4 py-3"><div className="mb-2 flex items-center justify-between"><p className="text-[9px] font-bold uppercase tracking-[0.16em] text-zinc-400">Technical details</p><span className="font-mono text-[9px] text-zinc-400">{toolCall.name}</span></div><pre className="max-h-60 overflow-auto whitespace-pre-wrap rounded-lg border border-zinc-200 bg-white p-3 font-mono text-[10px] leading-relaxed text-zinc-600">{JSON.stringify(toolCall.arguments, null, 2)}</pre></div>}
     </article>

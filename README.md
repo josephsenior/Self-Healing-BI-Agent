@@ -178,3 +178,24 @@ See [docs/architecture.md](docs/architecture.md) for a detailed breakdown of the
 See [docs/qualification.md](docs/qualification.md) for the idempotent single-user Fabric semantic-model, report, PNG rendering, and visual-QA qualification workflow.
 
 See [docs/bigquery.md](docs/bigquery.md) for the read-only BigQuery security boundary and local Power BI DirectQuery/Import model bridge.
+## One-command local launch
+
+With Memurai running and dependencies installed, start the complete development app from the repository root:
+
+```powershell
+python start.py
+```
+
+This starts FastAPI on `127.0.0.1:8000` and Next.js on `localhost:3000`. Press `Ctrl+C` once to stop both processes. BigQuery proxy handling is read from `.env`; no per-terminal proxy commands are required.
+## LangGraph and Redis runtime
+
+The backend is a modular monolith: LangGraph owns the bounded model/tool workflow, LangChain provides provider-neutral model adapters, and Redis stores thread checkpoints and cross-worker locks. Existing BigQuery, MCP, Power BI authoring, QA, Desktop, and Fabric tools remain deterministic services.
+
+```powershell
+# Memurai installed: no Redis startup command is needed.
+# Alternative: docker compose up -d redis
+python -m pip install -r requirements.txt
+uvicorn backend.main:app --reload --port 8000
+```
+
+Use `REDIS_REQUIRED=true` when durable state is mandatory. Memurai uses the included core-command checkpointer; Redis Stack automatically uses the official Search/JSON saver. The health endpoint reports `redis-search`, `redis-basic`, or `memory` and whether state is durable. See [docs/architecture.md](docs/architecture.md).

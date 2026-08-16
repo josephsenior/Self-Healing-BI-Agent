@@ -119,25 +119,26 @@ class RetryingCloudHttpClient:
 def synthetic_model_definition() -> dict[str, Any]:
     """A deterministic, data-source-free TMSL model for cloud qualification."""
     rows = [
-        '(DATE(2026,1,1), "Mobile", "North", 12, 2400.0, 1500.0)',
-        '(DATE(2026,1,15), "Fiber", "Tunis", 8, 3600.0, 2100.0)',
-        '(DATE(2026,2,1), "Cloud", "South", 5, 4200.0, 2600.0)',
-        '(DATE(2026,2,15), "Mobile", "Tunis", 15, 3100.0, 1800.0)',
-        '(DATE(2026,3,1), "Fiber", "North", 10, 3900.0, 2200.0)',
-        '(DATE(2026,3,15), "Cloud", "Tunis", 7, 5100.0, 3000.0)',
-        '(DATE(2026,4,1), "Mobile", "South", 18, 3700.0, 2050.0)',
-        '(DATE(2026,4,15), "Fiber", "Tunis", 11, 4400.0, 2450.0)',
-        '(DATE(2026,5,1), "Cloud", "North", 9, 5700.0, 3200.0)',
-        '(DATE(2026,5,15), "Mobile", "Tunis", 20, 4100.0, 2250.0)',
-        '(DATE(2026,6,1), "Fiber", "South", 13, 4900.0, 2700.0)',
-        '(DATE(2026,6,15), "Cloud", "Tunis", 10, 6300.0, 3500.0)',
+        '("2026-01-01", "Mobile", "North", 12, 2400.0, 1500.0)',
+        '("2026-01-15", "Fiber", "Tunis", 8, 3600.0, 2100.0)',
+        '("2026-02-01", "Cloud", "South", 5, 4200.0, 2600.0)',
+        '("2026-02-15", "Mobile", "Tunis", 15, 3100.0, 1800.0)',
+        '("2026-03-01", "Fiber", "North", 10, 3900.0, 2200.0)',
+        '("2026-03-15", "Cloud", "Tunis", 7, 5100.0, 3000.0)',
+        '("2026-04-01", "Mobile", "South", 18, 3700.0, 2050.0)',
+        '("2026-04-15", "Fiber", "Tunis", 11, 4400.0, 2450.0)',
+        '("2026-05-01", "Cloud", "North", 9, 5700.0, 3200.0)',
+        '("2026-05-15", "Mobile", "Tunis", 20, 4100.0, 2250.0)',
+        '("2026-06-01", "Fiber", "South", 13, 4900.0, 2700.0)',
+        '("2026-06-15", "Cloud", "Tunis", 10, 6300.0, 3500.0)',
     ]
+    # ROW is intentionally used instead of DATATABLE here. Fabric accepts this
+    # calculated-table expression consistently when a TMSL definition is
+    # created through the public API, including in Pro workspaces.
     expression = (
-        'DATATABLE('
-        '"Order Date", DATETIME, "Product", STRING, "Region", STRING, '
-        '"Quantity", INTEGER, "Revenue", DOUBLE, "Cost", DOUBLE, {'
-        + ",".join(rows)
-        + "})"
+        'ROW("Order Date", "2026-01-01", "Product", "Mobile", '
+        '"Region", "North", "Quantity", 12, "Revenue", 2400.0, '
+        '"Cost", 1500.0)'
     )
     return {
         "name": MODEL_DISPLAY_NAME,
@@ -154,8 +155,7 @@ def synthetic_model_definition() -> dict[str, Any]:
                         {
                             "type": "calculatedTableColumn",
                             "name": "Order Date",
-                            "dataType": "dateTime",
-                            "formatString": "yyyy-MM-dd",
+                            "dataType": "string",
                             "sourceColumn": "[Order Date]",
                             "summarizeBy": "none",
                         },
@@ -245,7 +245,7 @@ def synthetic_catalog() -> SemanticModelCatalog:
                 {
                     "name": "Sales",
                     "columns": [
-                        {"name": "Order Date", "data_type": "datetime", "distinct_count": 12},
+                        {"name": "Order Date", "data_type": "string", "distinct_count": 12},
                         {"name": "Product", "data_type": "string", "distinct_count": 3},
                         {"name": "Region", "data_type": "string", "distinct_count": 3},
                         {"name": "Quantity", "data_type": "int64"},
@@ -535,17 +535,21 @@ class FabricQualificationClient:
         )
 
     def _complete_lro(
-        self, response: httpx.Response, operation: str
+        self,
+        response: httpx.Response,
+        operation: str,
+        *,
+        expect_result: bool = True,
     ) -> tuple[dict[str, Any], str | None]:
         if response.status_code != 202:
             return _response_json(response), None
+        location = response.headers.get("Location", "").rstrip("/")
         operation_id = response.headers.get("x-ms-operation-id")
         if not operation_id:
-            location = response.headers.get("Location", "").rstrip("/")
             operation_id = location.rsplit("/", 1)[-1] if location else ""
         if not operation_id:
             raise CloudAPIError(f"{operation} returned 202 without an operation id")
-        state_url = f"{FABRIC_API}/operations/{operation_id}"
+        state_url = location or f"{FABRIC_API}/operations/{operation_id}"
         deadline = time.monotonic() + self.config.timeout_seconds
         while time.monotonic() < deadline:
             state_response = self._request(
@@ -555,6 +559,8 @@ class FabricQualificationClient:
             state = _response_json(state_response)
             status = state.get("status")
             if status == "Succeeded":
+                if not expect_result:
+                    return {}, operation_id
                 result_response = self._request(
                     "GET",
                     f"{state_url}/result",
@@ -628,7 +634,11 @@ class FabricQualificationClient:
                 json={"definition": definition},
             )
             _ensure_success(response, "update qualification semantic model")
-            _, operation_id = self._complete_lro(response, "semantic-model update")
+            _, operation_id = self._complete_lro(
+                response,
+                "semantic-model update",
+                expect_result=False,
+            )
             return SemanticModelResult(
                 "updated",
                 self.config.workspace_id,

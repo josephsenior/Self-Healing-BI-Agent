@@ -42,14 +42,22 @@ configuration for a visual already available in the target environment.
 4. Call stage_pbir_report.
 5. Call validate_pbir_report or inspect_pbir_report on the staged report.
 6. Call `check_powerbi_cloud_qa_readiness`.
-7. Call `publish_pbir_to_fabric` with a remote semantic model ID.
-8. Call `render_powerbi_report` to export the real report pages as PNG files.
+7. When `publishing_ready` is true, call `publish_pbir_to_fabric` with a remote
+   semantic model ID.
+8. Only when `visual_qa_ready` is true, call `render_powerbi_report` to export
+   the real report pages as PNG files. A Pro/PPU workspace stops after step 7.
 9. Call `review_powerbi_render` to obtain structured visual findings.
 10. Call `decide_powerbi_visual_qa_iteration` and revise the specification when
    allowed. The default maximum is three attempts.
 
 A local model reference normally looks like ../Sales.SemanticModel. A report
 targeting a model in Fabric can provide semantic_model_id instead.
+
+For a Power BI Pro cloud workspace, the agent uses the direct REST tools
+`list_powerbi_cloud_semantic_models`, `get_powerbi_cloud_semantic_catalog`, and
+`execute_powerbi_cloud_dax`. They do not depend on the preview remote MCP server
+or on Fabric capacity. The tenant must enable Execute Queries and service
+principal access, and the app must have workspace access.
 
 ## Real visual testing in Power BI Desktop
 
@@ -129,10 +137,11 @@ is supplied. Set `POWERBI_QA_REQUIRE_SEMANTIC_CATALOG=true` for fail-closed live
 semantic validation. `POWERBI_QA_BLOCKING_QUALITY_CODES` can promote selected
 quality recommendations to blocking defects.
 
-Cloud publication, PNG rendering, and multimodal review remain a separate gate
-because they require Fabric configuration and authorization for external
-writes. A local verification result must not be described as cloud-rendered or
-visually approved.
+Cloud publication is independent from PNG rendering. Set
+`POWERBI_CLOUD_LICENSE_MODE=pro` for a Pro workspace: report creation and update
+remain available, while PNG rendering and multimodal review are intentionally
+disabled because Power BI `ExportToFile` requires Fabric, Premium, or Embedded
+capacity. A publication result must not be described as visually approved.
 
 ## Validation scope
 

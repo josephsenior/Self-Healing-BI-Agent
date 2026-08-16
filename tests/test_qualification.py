@@ -37,7 +37,7 @@ class QualificationFixtureTests(unittest.TestCase):
         model = synthetic_model_definition()
         sales = model["model"]["tables"][0]
         self.assertEqual(sales["partitions"][0]["source"]["type"], "calculated")
-        self.assertIn("DATATABLE", sales["partitions"][0]["source"]["expression"])
+        self.assertIn("ROW(", sales["partitions"][0]["source"]["expression"])
         self.assertGreaterEqual(len(sales["measures"]), 5)
 
     def test_store_persists_steps_and_resource_ids(self) -> None:

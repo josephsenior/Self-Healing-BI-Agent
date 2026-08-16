@@ -18,6 +18,7 @@ VERSION_SCHEMA = "https://developer.microsoft.com/json-schemas/fabric/item/repor
 PAGES_SCHEMA = "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/pagesMetadata/1.0.0/schema.json"
 PAGE_SCHEMA = "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/page/2.0.0/schema.json"
 VISUAL_SCHEMA = "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.0.0/schema.json"
+PBIP_SCHEMA = "https://developer.microsoft.com/json-schemas/fabric/pbip/pbipProperties/1.0.0/schema.json"
 
 
 @dataclass(frozen=True)
@@ -65,10 +66,29 @@ def _field_expression(field: FieldRef) -> dict[str, Any]:
     }
 
 
-def _projection(field: FieldRef, *, active: bool | None = None) -> dict[str, Any]:
+def _projection(
+    field: FieldRef,
+    *,
+    aggregate_column: bool = False,
+    active: bool | None = None,
+) -> dict[str, Any]:
+    if field.kind == "column" and aggregate_column:
+        expression = {
+            "Aggregation": {
+                "Expression": _field_expression(field),
+                "Function": 0,
+            }
+        }
+        query_ref = f"Sum({field.query_ref})"
+        native_query_ref = f"Sum of {field.name}"
+    else:
+        expression = _field_expression(field)
+        query_ref = field.query_ref
+        native_query_ref = field.name
     value: dict[str, Any] = {
-        "field": _field_expression(field),
-        "queryRef": field.query_ref,
+        "field": expression,
+        "queryRef": query_ref,
+        "nativeQueryRef": native_query_ref,
     }
     if active is not None:
         value["active"] = active
@@ -76,11 +96,20 @@ def _projection(field: FieldRef, *, active: bool | None = None) -> dict[str, Any
 
 
 def _query_state(spec: VisualSpec) -> dict[str, Any]:
+    capability = spec.capability()
+    aggregate_roles = {
+        role.query_role
+        for role in capability.roles.values()
+        if role.field_kind != "column"
+    }
+    if capability.family in {"table", "filter", "custom", "canvas"}:
+        aggregate_roles.clear()
     return {
         role: {
             "projections": [
                 _projection(
                     item,
+                    aggregate_column=role in aggregate_roles,
                     active=True
                     if role == "Values" and spec.visual_type == "slicer"
                     else None,
@@ -178,7 +207,7 @@ def _compile_visual(
     page_targets: dict[str, str],
 ) -> dict[str, Any]:
     visual: dict[str, Any] = {
-        "visualType": spec.visual_type,
+        "visualType": "cardVisual" if spec.visual_type == "card" else spec.visual_type,
         "drillFilterOtherVisuals": True,
     }
     query_state = _query_state(spec)
@@ -234,6 +263,12 @@ def compile_report(
             }
         }
 
+    _write_json(change_root / f"{report_name}.pbip", {
+        "$schema": PBIP_SCHEMA,
+        "version": "1.0",
+        "artifacts": [{"report": {"path": f"{report_name}.Report"}}],
+        "settings": {"enableAutoRecovery": True},
+    })
     _write_json(report_root / "definition.pbir", {
         "$schema": PBIR_PROPERTIES_SCHEMA, "version": "4.0",
         "datasetReference": dataset_reference,
@@ -304,7 +339,7 @@ def compile_report(
 
     files = sorted(
         str(path.relative_to(change_root)).replace("\\", "/")
-        for path in report_root.rglob("*")
+        for path in change_root.rglob("*")
         if path.is_file()
     )
     validation = validate_pbir_project(report_root)

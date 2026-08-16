@@ -2,6 +2,7 @@ export interface ToolCall {
   id: string;
   name: string;
   arguments: Record<string, unknown>;
+  status?: "running" | "complete" | "failed" | "cancelled";
   result?: string;
   error?: string;
 }
@@ -50,7 +51,7 @@ export type ConnectionStatus = "connecting" | "connected" | "disconnected" | "er
 export type AgentStatus = "idle" | "starting_agent" | "mcp_connected" | "running" | "complete" | "cancelled" | "error";
 
 export type WSOutgoingMessage =
-  | { type: "query"; text: string; reasoningEffort?: string }
+  | { type: "query"; text: string; reasoningEffort?: string; threadId: string }
   | { type: "elicitation_response"; id: string; action: "accept" | "decline" | "cancel"; content: Record<string, unknown> }
   | { type: "abort" };
 
@@ -61,6 +62,7 @@ export type WSIncomingMessage =
   | { type: "tool_start"; calls: { id: string; name: string; arguments: Record<string, unknown> }[] }
   | { type: "tool_result"; id: string; name: string; result?: string; error?: string }
   | { type: "tools_discovered"; tools: string[]; count: number }
+  | { type: "thread_ready"; threadId: string }
   | { type: "elicitation_request"; id: string; mode: "form" | "url"; message: string; schema?: Record<string, unknown>; url?: string }
   | { type: "complete" }
   | { type: "error"; message: string };

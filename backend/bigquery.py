@@ -174,8 +174,11 @@ class BigQueryService:
         storage_mode: Literal["import", "directQuery"] = "directQuery",
     ) -> PowerBIModelBinding:
         """Create a credential-free PBIP semantic model bound to one BigQuery table."""
-        if storage_mode not in {"import", "directQuery"}:
+        normalized_mode = str(storage_mode).strip().replace("-", "").replace("_", "").casefold()
+        storage_modes = {"import": "import", "directquery": "directQuery"}
+        if normalized_mode not in storage_modes:
             raise ValueError("storage_mode must be 'import' or 'directQuery'")
+        storage_mode = storage_modes[normalized_mode]
         ref = self.table(table)
         resource = self.client.get_table(ref.full_name)
         fields = list(resource.schema)
@@ -249,7 +252,14 @@ class BigQueryService:
         }
         self._write_json(
             model_dir / "definition.pbism",
-            {"version": "4.2", "settings": {"qnaEnabled": True}},
+            {
+                "$schema": (
+                    "https://developer.microsoft.com/json-schemas/fabric/item/"
+                    "semanticModel/definitionProperties/1.0.0/schema.json"
+                ),
+                "version": "4.2",
+                "settings": {"qnaEnabled": True},
+            },
         )
         self._write_json(model_dir / "model.bim", model)
         self._write_json(

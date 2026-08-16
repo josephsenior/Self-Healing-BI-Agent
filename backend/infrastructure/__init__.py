@@ -1,0 +1,1 @@
+"""Infrastructure adapters for models, persistence, and external services."""

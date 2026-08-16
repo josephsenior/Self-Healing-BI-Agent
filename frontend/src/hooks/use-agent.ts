@@ -28,6 +28,23 @@ interface UseAgentReturn {
   reconnect: () => void;
 }
 
+function interruptRunningToolCalls(messages: ChatMessage[], reason: string): ChatMessage[] {
+  const settle = (toolCall: ToolCall): ToolCall => {
+    const pending =
+      toolCall.status === "running" ||
+      (toolCall.status === undefined && toolCall.result === undefined && !toolCall.error);
+    return pending ? { ...toolCall, status: "cancelled", error: reason } : toolCall;
+  };
+
+  return messages.map((message) => ({
+    ...message,
+    toolCalls: message.toolCalls?.map(settle),
+    parts: message.parts?.map((part) =>
+      part.type === "tool_call" ? { ...part, toolCall: settle(part.toolCall) } : part
+    ),
+  }));
+}
+
 export function useAgent(url: string): UseAgentReturn {
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("disconnected");
   const [agentStatus, setAgentStatus] = useState<AgentStatus>("idle");
@@ -38,6 +55,7 @@ export function useAgent(url: string): UseAgentReturn {
 
   const socketRef = useRef<WebSocket | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const shouldReconnectRef = useRef(true);
   const activeToolCallsRef = useRef<ToolCall[]>([]);
 
   // Keep ref in sync with state for use inside closures
@@ -51,8 +69,9 @@ export function useAgent(url: string): UseAgentReturn {
     switch (payload.type) {
       case "status":
         setAgentStatus(payload.status as AgentStatus);
-        if (payload.status === "starting_agent") {
+        if (["starting_agent", "idle", "cancelled", "error"].includes(payload.status)) {
           setActiveToolCalls([]);
+          setMessages((prev) => interruptRunningToolCalls(prev, "Execution was interrupted."));
         }
         break;
 
@@ -139,6 +158,7 @@ export function useAgent(url: string): UseAgentReturn {
           id: c.id,
           name: c.name,
           arguments: c.arguments,
+          status: "running",
         }));
         setActiveToolCalls((prev) => [...prev, ...started]);
 
@@ -178,47 +198,33 @@ export function useAgent(url: string): UseAgentReturn {
       }
 
       case "tool_result":
-        setActiveToolCalls((prev) =>
-          prev.map((c) =>
-            c.id === payload.id
-              ? { ...c, result: payload.result, error: payload.error }
-              : c
-          )
-        );
+        // A result means this call is no longer active. Keeping it here made
+        // completed calls render as "Running".
+        setActiveToolCalls((prev) => prev.filter((c) => c.id !== payload.id));
 
-        setMessages((prev) => {
-          if (prev.length === 0 || prev[prev.length - 1].role !== "assistant") return prev;
-
-          const updated = [...prev];
-          const last = { ...updated[updated.length - 1] };
-
-          if (last.toolCalls) {
-            last.toolCalls = last.toolCalls.map((c) =>
-              c.id === payload.id ? { ...c, result: payload.result, error: payload.error } : c
-            );
-          }
-
-          if (last.parts) {
-            last.parts = last.parts.map((p) => {
-              if (p.type === "tool_call" && p.toolCall.id === payload.id) {
-                return {
-                  ...p,
-                  toolCall: {
-                    ...p.toolCall,
-                    result: payload.result,
-                    error: payload.error,
-                  },
-                };
-              }
-              return p;
-            });
-          }
-
-          updated[updated.length - 1] = last;
-          return updated;
-        });
+        const completionStatus: ToolCall["status"] = payload.error ? "failed" : "complete";
+        setMessages((prev) => prev.map((message) => {
+          // Results can arrive after another assistant event, so search all messages.
+          let changed = false;
+          const toolCalls = message.toolCalls?.map((call) => {
+            if (call.id !== payload.id) return call;
+            changed = true;
+            return { ...call, status: completionStatus, result: payload.result ?? "", error: payload.error };
+          });
+          const parts = message.parts?.map((part) => {
+            if (part.type !== "tool_call" || part.toolCall.id !== payload.id) return part;
+            changed = true;
+            return { ...part, toolCall: { ...part.toolCall, status: completionStatus, result: payload.result ?? "", error: payload.error } };
+          });
+          return changed ? { ...message, toolCalls, parts } : message;
+        }));
         break;
 
+      case "thread_ready":
+        if (!window.localStorage.getItem("data-analysis-agent-thread-id")) {
+          window.localStorage.setItem("data-analysis-agent-thread-id", payload.threadId);
+        }
+        break;
       case "tools_discovered":
         setDiscoveredTools(payload.tools);
         break;
@@ -239,6 +245,7 @@ export function useAgent(url: string): UseAgentReturn {
         break;
 
       case "error":
+        setActiveToolCalls([]);
         setAgentStatus("error");
         setMessages((prev) => [
           ...prev,
@@ -255,12 +262,18 @@ export function useAgent(url: string): UseAgentReturn {
 
   const connect = useCallback(() => {
     // Prevent duplicate connections
-    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+    if (
+      socketRef.current &&
+      (socketRef.current.readyState === WebSocket.OPEN ||
+        socketRef.current.readyState === WebSocket.CONNECTING)
+    ) {
       return;
     }
 
     if (socketRef.current) {
+      socketRef.current.onclose = null;
       socketRef.current.close();
+      socketRef.current = null;
     }
 
     setConnectionStatus("connecting");
@@ -273,7 +286,11 @@ export function useAgent(url: string): UseAgentReturn {
     };
 
     ws.onclose = () => {
+      if (socketRef.current === ws) socketRef.current = null;
       setConnectionStatus("disconnected");
+      setActiveToolCalls([]);
+      setMessages((prev) => interruptRunningToolCalls(prev, "Connection closed before the tool returned."));
+      if (!shouldReconnectRef.current) return;
       // Auto-reconnect after 3 seconds
       reconnectTimer.current = setTimeout(() => {
         connect();
@@ -289,14 +306,19 @@ export function useAgent(url: string): UseAgentReturn {
 
   // Connect on mount, cleanup on unmount
   useEffect(() => {
+    shouldReconnectRef.current = true;
     connect();
 
     return () => {
+      shouldReconnectRef.current = false;
       if (reconnectTimer.current) {
         clearTimeout(reconnectTimer.current);
+        reconnectTimer.current = null;
       }
       if (socketRef.current) {
+        socketRef.current.onclose = null;
         socketRef.current.close();
+        socketRef.current = null;
       }
     };
   }, [connect]);
@@ -319,7 +341,13 @@ export function useAgent(url: string): UseAgentReturn {
     setActiveToolCalls([]);
 
     // Send over WebSocket
-    const msg: WSOutgoingMessage = { type: "query", text, reasoningEffort };
+const storageKey = "data-analysis-agent-thread-id";
+    let threadId = window.localStorage.getItem(storageKey);
+    if (!threadId) {
+      threadId = crypto.randomUUID();
+      window.localStorage.setItem(storageKey, threadId);
+    }
+    const msg: WSOutgoingMessage = { type: "query", text, reasoningEffort, threadId };
     socketRef.current.send(JSON.stringify(msg));
 
     setAgentStatus("running");
@@ -348,11 +376,15 @@ export function useAgent(url: string): UseAgentReturn {
   }, []);
 
   const reconnect = useCallback(() => {
+    shouldReconnectRef.current = true;
     if (reconnectTimer.current) {
       clearTimeout(reconnectTimer.current);
+      reconnectTimer.current = null;
     }
     if (socketRef.current) {
+      socketRef.current.onclose = null;
       socketRef.current.close();
+      socketRef.current = null;
     }
     connect();
   }, [connect]);

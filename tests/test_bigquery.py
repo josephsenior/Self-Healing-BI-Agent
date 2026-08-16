@@ -173,6 +173,7 @@ class BigQueryTests(unittest.TestCase):
         partition = model["model"]["tables"][0]["partitions"][0]
         expression = "\n".join(partition["source"]["expression"])
         self.assertEqual(definition["version"], "4.2")
+        self.assertIn("semanticModel/definitionProperties/1.0.0", definition["$schema"])
         self.assertEqual(partition["mode"], "directQuery")
         self.assertEqual(partition["source"]["type"], "m")
         self.assertIn("GoogleBigQuery.Database", expression)
@@ -188,6 +189,25 @@ class BigQueryTests(unittest.TestCase):
             self.service().create_powerbi_model(
                 "sales.orders", ".", storage_mode="dual"
             )
+
+    def test_powerbi_model_normalizes_human_storage_mode_casing(self):
+        root = Path.cwd() / ".test-bigquery-model-normalized"
+        shutil.rmtree(root, ignore_errors=True)
+        try:
+            binding = self.service().create_powerbi_model(
+                "sales.orders", root, storage_mode="Import"
+            )
+            model = json.loads(
+                (Path(binding.semantic_model_path) / "model.bim").read_text(
+                    encoding="utf-8"
+                )
+            )
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+        self.assertEqual(binding.storage_mode, "import")
+        self.assertEqual(
+            model["model"]["tables"][0]["partitions"][0]["mode"], "import"
+        )
 
     def test_external_query_is_rejected_before_calling_bigquery(self):
         client = FakeClient()

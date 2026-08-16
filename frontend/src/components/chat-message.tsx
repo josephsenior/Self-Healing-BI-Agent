@@ -194,7 +194,13 @@ export function ChatMessageBubble({
             )}
 
             {displayContent && (
-              <MarkdownRenderer content={displayContent} isStreaming={isStreaming} />
+              isUser ? (
+                <div className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+                  {displayContent}
+                </div>
+              ) : (
+                <MarkdownRenderer content={displayContent} isStreaming={isStreaming} />
+              )
             )}
 
             {isStreaming && displayContent && (

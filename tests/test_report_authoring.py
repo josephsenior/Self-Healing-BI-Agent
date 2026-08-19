@@ -1,6 +1,7 @@
 import json
 import base64
 import io
+import sys
 import tempfile
 import unittest
 import zipfile
@@ -195,6 +196,14 @@ class ExpandedVisualAuthoringTests(unittest.TestCase):
                 official_schemas=True,
                 allow_schema_download=False,
             )
+            if not report.valid and any(
+                issue.code == "schema_unavailable" for issue in report.issues
+            ):
+                report = validate_pbir_project(
+                    result.report_path,
+                    official_schemas=True,
+                    allow_schema_download=True,
+                )
             self.assertTrue(report.valid, report.to_dict())
 
     def test_scatter_uses_visual_specific_query_roles(self) -> None:
@@ -531,6 +540,7 @@ class DesktopVisualHandoffTests(unittest.TestCase):
             )
             self.assertTrue(result.validation["valid"])
 
+    @unittest.skipUnless(sys.platform == "win32", "os.startfile is Windows-only")
     def test_desktop_open_uses_definition_pbir_file(self) -> None:
         with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as root:
             compiled = compile_report(sample_spec(), root)
@@ -695,6 +705,7 @@ class StatefulDashboardWorkspaceTests(unittest.TestCase):
             current = manager.get()["current"]
             self.assertEqual(current["spec"], json.loads(Path(created.spec_path).read_text())["spec"])
 
+    @unittest.skipUnless(sys.platform == "win32", "os.startfile is Windows-only")
     def test_open_active_uses_saved_semantic_model(self) -> None:
         with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as root_value:
             root = Path(root_value)

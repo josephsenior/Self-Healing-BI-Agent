@@ -5,6 +5,7 @@ export interface ToolCall {
   status?: "running" | "complete" | "failed" | "cancelled";
   result?: string;
   error?: string;
+  images?: string[];
 }
 
 export type MessagePart =
@@ -60,7 +61,7 @@ export type WSIncomingMessage =
   | { type: "token"; text: string }
   | { type: "reasoning_token"; text: string }
   | { type: "tool_start"; calls: { id: string; name: string; arguments: Record<string, unknown> }[] }
-  | { type: "tool_result"; id: string; name: string; result?: string; error?: string }
+  | { type: "tool_result"; id: string; name: string; result?: string; error?: string; images?: string[] }
   | { type: "tools_discovered"; tools: string[]; count: number }
   | { type: "thread_ready"; threadId: string }
   | { type: "elicitation_request"; id: string; mode: "form" | "url"; message: string; schema?: Record<string, unknown>; url?: string }

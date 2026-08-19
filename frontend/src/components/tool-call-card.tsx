@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
   AlertCircle,
@@ -35,6 +35,7 @@ import {
   Sparkles,
   Table2,
   TerminalSquare,
+  X,
   XCircle,
 } from "lucide-react";
 import type { ToolCall } from "@/types";
@@ -65,6 +66,7 @@ interface ToolTheme {
 
 interface ToolCallCardProps {
   toolCall: ToolCall;
+  apiBase?: string;
 }
 
 const THEMES: Record<ToolKind, Omit<ToolTheme, "label" | "icon">> = {
@@ -226,11 +228,22 @@ function getActionSummary(toolCall: ToolCall, data: unknown): string {
   return complete ? `Finished ${getTheme(toolCall.name).label.toLowerCase()}` : `Working on ${getTheme(toolCall.name).label.toLowerCase()}`;
 }
 
-function Status({ toolCall }: { toolCall: ToolCall }) {
-  if (toolCall.status === "cancelled") return <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-amber-700"><XCircle className="size-3" /> Interrupted</span>;
-  if (toolCall.status === "failed" || toolCall.error) return <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-red-700"><XCircle className="size-3" /> Failed</span>;
-  if (toolCall.status === "complete" || toolCall.result !== undefined) return <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-700"><CheckCircle2 className="size-3" /> Complete</span>;
-  return <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-zinc-500"><Clock3 className="size-3 animate-spin" /> In progress</span>;
+function formatDuration(ms: number) {
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
+  return `${Math.floor(ms / 60_000)}m ${Math.round((ms % 60_000) / 1000)}s`;
+}
+
+function Status({ toolCall, durationMs }: { toolCall: ToolCall; durationMs?: number }) {
+  const pill = (cls: string, icon: React.ReactNode, label: string) => (
+    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider ${cls}`}>
+      {icon}{label}{durationMs !== undefined && !(toolCall.status === "running" || toolCall.status === undefined) ? <span className="font-mono font-semibold normal-case tracking-normal opacity-80">· {formatDuration(durationMs)}</span> : null}
+    </span>
+  );
+  if (toolCall.status === "cancelled") return pill("bg-amber-100 text-amber-700", <XCircle className="size-3" />, "Interrupted");
+  if (toolCall.status === "failed" || toolCall.error) return pill("bg-red-100 text-red-700", <XCircle className="size-3" />, "Failed");
+  if (toolCall.status === "complete" || toolCall.result !== undefined) return pill("bg-emerald-100 text-emerald-700", <CheckCircle2 className="size-3" />, "Complete");
+  return pill("bg-zinc-100 text-zinc-600", <Clock3 className="size-3 animate-spin" />, "Running");
 }
 
 function CopyButton({ value }: { value: string }) {
@@ -267,8 +280,25 @@ function CodePanel({ code, language, output }: { code: string; language: string;
 
 function DataGrid({ rows }: { rows: unknown[] }) {
   const records = rows.filter((row): row is JsonRecord => asRecord(row) !== null);
+  const [sortKey, setSortKey] = useState<string | null>(null);
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const [limit, setLimit] = useState(50);
   if (!records.length) return <EmptyState label="No rows returned" />;
   const columns = Array.from(new Set(records.slice(0, 50).flatMap((row) => Object.keys(row))));
+
+  const sorted = [...records];
+  if (sortKey) {
+    sorted.sort((a, b) => {
+      const av = a[sortKey]; const bv = b[sortKey];
+      const an = typeof av === "number"; const bn = typeof bv === "number";
+      if (an && bn) return sortDir === "asc" ? (av as number) - (bv as number) : (bv as number) - (av as number);
+      const as = String(av ?? ""); const bs = String(bv ?? "");
+      return sortDir === "asc" ? as.localeCompare(bs) : bs.localeCompare(as);
+    });
+  }
+  const page = sorted.slice(0, limit);
+  const isNumeric = (key: string) => records.every((r) => typeof r[key] === "number");
+
   const exportCsv = () => {
     const escape = (value: unknown) => `"${String(value ?? "").replace(/"/g, '""')}"`;
     const csv = [columns.join(","), ...records.map((row) => columns.map((key) => escape(row[key])).join(","))].join("\r\n");
@@ -276,22 +306,47 @@ function DataGrid({ rows }: { rows: unknown[] }) {
     const anchor = document.createElement("a");
     anchor.href = url; anchor.download = `query-${Date.now()}.csv`; anchor.click(); URL.revokeObjectURL(url);
   };
+  const copyJson = async () => {
+    await navigator.clipboard.writeText(JSON.stringify(records, null, 2));
+    setCopiedJson(true);
+    window.setTimeout(() => setCopiedJson(false), 1200);
+  };
+  const [copiedJson, setCopiedJson] = useState(false);
+
   return (
     <div className="overflow-hidden rounded-xl border border-orange-200 bg-white">
-      <div className="flex items-center justify-between bg-orange-50/70 px-3 py-2">
+      <div className="flex flex-wrap items-center gap-2 bg-orange-50/70 px-3 py-2">
         <span className="text-[10px] font-bold uppercase tracking-wider text-orange-800">{records.length.toLocaleString()} rows · {columns.length} columns</span>
-        <button onClick={exportCsv} className="inline-flex items-center gap-1 rounded-md bg-white px-2 py-1 text-[10px] font-semibold text-orange-700 shadow-sm ring-1 ring-orange-200 hover:bg-orange-100"><Download className="size-3" /> CSV</button>
+        <div className="ml-auto flex items-center gap-1">
+          <button onClick={copyJson} className="inline-flex items-center gap-1 rounded-md bg-white px-2 py-1 text-[10px] font-semibold text-zinc-600 shadow-sm ring-1 ring-zinc-200 hover:bg-zinc-50" aria-label="Copy JSON"><Copy className="size-3" />{copiedJson ? "Copied" : "JSON"}</button>
+          <button onClick={exportCsv} className="inline-flex items-center gap-1 rounded-md bg-white px-2 py-1 text-[10px] font-semibold text-orange-700 shadow-sm ring-1 ring-orange-200 hover:bg-orange-100"><Download className="size-3" /> CSV</button>
+        </div>
       </div>
       <div className="max-h-72 overflow-auto">
         <table className="min-w-full border-collapse text-left text-[11px]">
           <thead className="sticky top-0 z-10 bg-zinc-50 text-zinc-600 shadow-[0_1px_0_#e4e4e7]">
-            <tr>{columns.map((column) => <th key={column} className="whitespace-nowrap px-3 py-2 font-semibold">{column}</th>)}</tr>
+            <tr>{columns.map((column) => {
+              const active = sortKey === column;
+              return <th key={column} className="whitespace-nowrap px-3 py-2 font-semibold">
+                <button onClick={() => {
+                  if (active) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+                  else { setSortKey(column); setSortDir("asc"); }
+                }} className="inline-flex items-center gap-1 hover:text-orange-700" aria-label={`Sort by ${column}`}>
+                  {column}{active ? (sortDir === "asc" ? " ↑" : " ↓") : " ⇅"}
+                </button>
+              </th>;
+            })}</tr>
           </thead>
           <tbody className="divide-y divide-zinc-100">
-            {records.map((row, index) => <tr key={index} className="hover:bg-orange-50/40">{columns.map((column) => <td key={column} className="max-w-64 truncate whitespace-nowrap px-3 py-1.5 font-mono text-zinc-700">{formatValue(row[column])}</td>)}</tr>)}
+            {page.map((row, index) => <tr key={index} className="hover:bg-orange-50/40">{columns.map((column) => <td key={column} className={`max-w-64 truncate whitespace-nowrap px-3 py-1.5 font-mono ${isNumeric(column) ? "text-right" : ""} ${row[column] === null || row[column] === undefined ? "text-zinc-400" : "text-zinc-700"}`}>{formatValue(row[column])}</td>)}</tr>)}
           </tbody>
         </table>
       </div>
+      {records.length > limit && (
+        <button onClick={() => setLimit((l) => l + 100)} className="w-full border-t border-zinc-100 bg-zinc-50/60 py-1.5 text-[10px] font-semibold text-zinc-500 hover:bg-zinc-100">
+          Show {Math.min(100, records.length - limit).toLocaleString()} more rows ({records.length.toLocaleString()} total)
+        </button>
+      )}
     </div>
   );
 }
@@ -309,24 +364,64 @@ function EmptyState({ label }: { label: string }) {
 function ValidationPanel({ data }: { data: unknown }) {
   const record = asRecord(data);
   if (!record) return <ValuePanel data={data} />;
-  const passed = record.valid === true || record.ready === true;
-  const checks = asRecord(record.checks);
+  const passed = record.valid === true || record.ready === true || record.accepted === true;
+  const gates = Array.isArray(record.gates) ? record.gates : null;
+  const checks = asRecord(record.checks) ?? asRecord(record.gates_summary);
   const issues = [record.issues, record.layout_errors, record.layout_issues, record.quality_issues, record.semantic_issues]
     .flatMap((item) => Array.isArray(item) ? item : [])
     .filter(Boolean);
+  const gateStatus = (value: unknown): "ok" | "warn" | "fail" => {
+    if (value === true || value === "passed" || value === "passed_with_findings" || value === "PASSED") return "ok";
+    if (value === false || value === "failed" || value === "FAILED" || value === "blocked" || value === "BLOCKED") return "fail";
+    if (value === "unavailable" || value === "skipped") return "warn";
+    return "ok";
+  };
+  const statusIcon = (status: "ok" | "warn" | "fail") =>
+    status === "ok" ? <Check className="size-2.5" /> : status === "fail" ? <XCircle className="size-2.5" /> : <AlertCircle className="size-2.5" />;
+  const statusCls = (status: "ok" | "warn" | "fail") =>
+    status === "ok" ? "bg-emerald-100 text-emerald-700" : status === "fail" ? "bg-red-100 text-red-700" : "bg-amber-100 text-amber-700";
   return (
     <div className="space-y-2.5">
       <div className={`flex items-center gap-3 rounded-xl border p-3 ${passed ? "border-emerald-200 bg-emerald-50" : "border-amber-200 bg-amber-50"}`}>
         <span className={`grid size-8 place-items-center rounded-full ${passed ? "bg-emerald-600 text-white" : "bg-amber-500 text-white"}`}>{passed ? <Check className="size-4" /> : <AlertCircle className="size-4" />}</span>
         <div><p className="text-xs font-bold text-zinc-900">{passed ? "All checks passed" : `${issues.length || "Some"} checks need attention`}</p><p className="text-[10px] text-zinc-500">{passed ? "This artifact is ready for the next step." : "Review the findings below before continuing."}</p></div>
       </div>
-      {checks && <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">{Object.entries(checks).map(([key, value]) => {
-        const ok = typeof value === "boolean" ? value : Boolean(value);
-        return <div key={key} className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-2.5 py-2"><span className={`grid size-4 place-items-center rounded-full ${ok ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"}`}>{ok ? <Check className="size-2.5" /> : <XCircle className="size-2.5" />}</span><span className="truncate text-[10px] font-medium text-zinc-700">{titleCase(key)}</span></div>;
+      {gates && gates.length > 0 && (
+        <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
+          {gates.map((gate, index) => {
+            const item = asRecord(gate) ?? {};
+            const name = String(item.name ?? item.gate ?? item.step ?? `Gate ${index + 1}`);
+            const status = gateStatus(item.status ?? item.passed);
+            const detail = item.detail ? String(item.detail).slice(0, 60) : "";
+            return (
+              <div key={`${name}-${index}`} className={`rounded-lg border px-2.5 py-2 ${status === "ok" ? "border-emerald-200 bg-white" : status === "fail" ? "border-red-200 bg-white" : "border-amber-200 bg-white"}`}>
+                <div className="flex items-center gap-2">
+                  <span className={`grid size-4 place-items-center rounded-full ${statusCls(status)}`}>{statusIcon(status)}</span>
+                  <span className="truncate text-[10px] font-semibold text-zinc-700">{titleCase(name)}</span>
+                </div>
+                {detail ? <p className="mt-0.5 truncate text-[9px] text-zinc-400" title={String(item.detail)}>{detail}</p> : null}
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {checks && Object.keys(checks).length > 0 && !gates && <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">{Object.entries(checks).map(([key, value]) => {
+        const status = gateStatus(value);
+        return <div key={key} className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-2.5 py-2"><span className={`grid size-4 place-items-center rounded-full ${statusCls(status)}`}>{statusIcon(status)}</span><span className="truncate text-[10px] font-medium text-zinc-700">{titleCase(key)}</span></div>;
       })}</div>}
       {issues.length > 0 && <div className="space-y-1.5">{issues.slice(0, 12).map((issue, index) => {
-        const item = asRecord(issue); const severity = String(item?.severity ?? "warning"); const message = item?.message ?? item?.detail ?? issue;
-        return <div key={index} className="flex gap-2 rounded-lg border border-zinc-200 bg-white px-3 py-2"><AlertCircle className={`mt-0.5 size-3 shrink-0 ${severity === "error" ? "text-red-500" : "text-amber-500"}`} /><div><p className="text-[11px] text-zinc-700">{formatValue(message)}</p>{item?.page ? <p className="mt-0.5 text-[9px] font-semibold uppercase text-zinc-400">{String(item.page)}</p> : null}</div></div>;
+        const item = asRecord(issue);
+        const severity = String(item?.severity ?? "warning").toLowerCase();
+        const badge = SEVERITY_STYLES[severity] ?? SEVERITY_STYLES.warning;
+        const message = item?.message ?? item?.detail ?? issue;
+        return <div key={index} className="flex gap-2 rounded-lg border border-zinc-200 bg-white px-3 py-2">
+          <AlertCircle className={`mt-0.5 size-3 shrink-0 ${severity === "error" ? "text-red-500" : "text-amber-500"}`} />
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-1.5"><span className={`rounded-full px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wider ring-1 ${badge.cls}`}>{badge.label}</span>{item?.code ? <span className="font-mono text-[9px] text-zinc-400">{String(item.code)}</span> : null}</div>
+            <p className="mt-0.5 text-[11px] leading-relaxed text-zinc-700">{formatValue(message)}</p>
+            {item?.page ? <p className="mt-0.5 text-[9px] font-semibold uppercase text-zinc-400">Page: {String(item.page)}</p> : null}
+          </div>
+        </div>;
       })}</div>}
     </div>
   );
@@ -336,7 +431,7 @@ function Stat({ label, value }: { label: string; value: React.ReactNode }) {
   return <div className="rounded-lg border border-zinc-200 bg-white px-3 py-2"><p className="text-[9px] font-bold uppercase tracking-wider text-zinc-400">{label}</p><div className="mt-0.5 truncate text-sm font-bold text-zinc-800">{value}</div></div>;
 }
 
-function DashboardPanel({ data }: { data: unknown }) {
+function DashboardPanel({ data, images, apiBase }: { data: unknown; images?: string[]; apiBase?: string }) {
   const root = asRecord(data);
   if (!root) return <ValuePanel data={data} />;
   const dashboard = asRecord(root.dashboard) ?? root;
@@ -347,17 +442,44 @@ function DashboardPanel({ data }: { data: unknown }) {
   const visualCount = pages.reduce((count, page) => count + (Array.isArray(asRecord(page)?.visuals) ? (asRecord(page)?.visuals as unknown[]).length : 0), 0);
   const title = spec?.title ?? dashboard.title ?? root.display_name ?? root.dashboard_id;
   const path = current.pbir_path ?? current.report_path ?? root.pbir_path ?? root.report_path ?? root.project_path;
+  const qa = asRecord(root.qa);
+  const accepted = root.accepted === true;
+  const qaStatus = qa ? String(qa.status ?? qa.outcome ?? "") : "";
+  const qaPromotable = qa?.promotable === true;
+  const qaScore = typeof qa?.score === "number" ? qa.score : undefined;
+  const qaBadge = qaStatus
+    ? { label: qaStatus, cls: qaPromotable || qaStatus === "VERIFIED" || qaStatus === "VERIFIED_WITH_WARNINGS" ? "bg-emerald-100 text-emerald-700 ring-emerald-200" : "bg-amber-100 text-amber-700 ring-amber-200" }
+    : accepted
+      ? { label: "Accepted", cls: "bg-emerald-100 text-emerald-700 ring-emerald-200" }
+      : null;
   return (
     <div className="overflow-hidden rounded-xl border border-indigo-200 bg-gradient-to-br from-indigo-50 to-white">
       <div className="flex items-start gap-3 p-3.5">
         <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-indigo-600 text-white shadow-sm"><BarChart2 className="size-4" /></span>
-        <div className="min-w-0 flex-1"><p className="truncate text-sm font-bold text-zinc-900">{formatValue(title ?? "Power BI report")}</p><p className="mt-0.5 truncate text-[10px] text-zinc-500">{formatValue(path ?? "Dashboard workspace")}</p></div>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <p className="truncate text-sm font-bold text-zinc-900">{formatValue(title ?? "Power BI report")}</p>
+            {qaBadge && <span className={`rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider ring-1 ${qaBadge.cls}`}>{qaBadge.label}</span>}
+            {qaScore !== undefined && <span className="rounded-full bg-white px-2 py-0.5 font-mono text-[9px] font-bold text-zinc-600 ring-1 ring-zinc-200">QA {qaScore}</span>}
+          </div>
+          <p className="mt-0.5 truncate text-[10px] text-zinc-500">{formatValue(path ?? "Dashboard workspace")}</p>
+        </div>
         {dashboard.active_version ?? current.version ?? root.version ? <span className="rounded-full bg-indigo-100 px-2 py-1 text-[10px] font-bold text-indigo-700">v{String(dashboard.active_version ?? current.version ?? root.version)}</span> : null}
       </div>
       <div className="grid grid-cols-3 gap-1.5 border-t border-indigo-100 bg-white/60 p-2.5">
         <Stat label="Pages" value={pages.length || "—"} /><Stat label="Visuals" value={visualCount || "—"} /><Stat label="Issues" value={(Array.isArray(current.quality_issues) ? current.quality_issues.length : 0) + (Array.isArray(current.semantic_issues) ? current.semantic_issues.length : 0)} />
       </div>
+      {images && images.length > 0 && (
+        <div className="border-t border-indigo-100 bg-white/70 p-3">
+          <ImageGallery images={images} apiBase={apiBase} />
+        </div>
+      )}
       {pages.length > 0 && <div className="flex gap-2 overflow-x-auto border-t border-indigo-100 px-3 py-2.5">{pages.slice(0, 8).map((page, index) => { const item = asRecord(page); const visuals = Array.isArray(item?.visuals) ? item.visuals.length : 0; return <div key={index} className="w-28 shrink-0 rounded-lg border border-indigo-100 bg-white p-2"><div className="mb-2 grid aspect-[16/9] place-items-center rounded bg-indigo-50 text-indigo-300"><BarChart2 className="size-4" /></div><p className="truncate text-[10px] font-bold text-zinc-700">{formatValue(item?.display_name ?? item?.name ?? `Page ${index + 1}`)}</p><p className="text-[9px] text-zinc-400">{visuals} visual{visuals === 1 ? "" : "s"}</p></div>; })}</div>}
+      {Boolean(root.candidate_manifest_path) && (
+        <div className="border-t border-indigo-100 bg-white/60 px-3 py-2">
+          <p className="flex items-center gap-1.5 truncate font-mono text-[9px] text-zinc-400"><FileText className="size-3 shrink-0" />{String(root.candidate_manifest_path)}</p>
+        </div>
+      )}
     </div>
   );
 }
@@ -379,7 +501,15 @@ function RelationshipPanel({ data }: { data: unknown }) {
 }
 
 function EntityList({ data }: { data: unknown[] }) {
-  return <div className="max-h-60 overflow-auto rounded-xl border border-violet-200 bg-white divide-y divide-zinc-100">{data.map((entry, index) => { const item = asRecord(entry); return <div key={index} className="flex items-center justify-between gap-3 px-3 py-2 hover:bg-violet-50/50"><div className="min-w-0"><p className="truncate font-mono text-[11px] font-semibold text-zinc-800">{formatValue(item?.name ?? item?.tableName ?? item?.table ?? entry)}</p>{item?.description ? <p className="truncate text-[9px] text-zinc-400">{String(item.description)}</p> : null}</div>{item?.dataType ?? item?.type ? <span className="rounded bg-violet-100 px-1.5 py-0.5 font-mono text-[9px] text-violet-700">{String(item.dataType ?? item.type)}</span> : null}</div>; })}</div>;
+  const typeColor = (type: string) => {
+    const value = type.toLowerCase();
+    if (/(int|float|decimal|number|numeric|double)/.test(value)) return "bg-emerald-100 text-emerald-700";
+    if (/(string|varchar|char|text|name)/.test(value)) return "bg-sky-100 text-sky-700";
+    if (/(bool)/.test(value)) return "bg-amber-100 text-amber-700";
+    if (/(date|time|timestamp|datetime)/.test(value)) return "bg-purple-100 text-purple-700";
+    return "bg-violet-100 text-violet-700";
+  };
+  return <div className="max-h-60 overflow-auto rounded-xl border border-violet-200 bg-white divide-y divide-zinc-100">{data.map((entry, index) => { const item = asRecord(entry); const type = String(item?.dataType ?? item?.type ?? ""); const rows = typeof item?.row_count === "number" ? item.row_count : undefined; return <div key={index} className="flex items-center justify-between gap-3 px-3 py-2 hover:bg-violet-50/50"><div className="min-w-0"><p className="truncate font-mono text-[11px] font-semibold text-zinc-800">{formatValue(item?.name ?? item?.tableName ?? item?.table ?? entry)}</p>{item?.description ? <p className="truncate text-[9px] text-zinc-400">{String(item.description)}</p> : null}</div><div className="flex shrink-0 items-center gap-1.5">{rows !== undefined ? <span className="rounded bg-zinc-100 px-1.5 py-0.5 font-mono text-[9px] text-zinc-500">{rows.toLocaleString()}</span> : null}{type ? <span className={`rounded px-1.5 py-0.5 font-mono text-[9px] ${typeColor(type)}`}>{type}</span> : null}</div></div>; })}</div>;
 }
 
 function ArtifactPanel({ data }: { data: unknown }) {
@@ -389,12 +519,114 @@ function ArtifactPanel({ data }: { data: unknown }) {
   return <div className="space-y-2">{paths.flatMap(([key, value]) => (Array.isArray(value) ? value : [value]).map((path, index) => <div key={`${key}-${index}`} className="flex items-center gap-3 rounded-xl border border-pink-200 bg-white px-3 py-2.5"><span className="grid size-8 shrink-0 place-items-center rounded-lg bg-pink-50 text-pink-600">{String(path).match(/\.(png|jpg|jpeg)$/i) ? <ImageIcon className="size-4" /> : <FileText className="size-4" />}</span><div className="min-w-0 flex-1"><p className="text-[9px] font-bold uppercase tracking-wider text-zinc-400">{titleCase(key)}</p><p className="truncate font-mono text-[10px] text-zinc-700">{String(path)}</p></div><ExternalLink className="size-3.5 text-zinc-300" /></div>))}</div>;
 }
 
-function ReviewPanel({ data }: { data: unknown }) {
+const SEVERITY_STYLES: Record<string, { label: string; cls: string }> = {
+  error: { label: "Error", cls: "bg-red-100 text-red-700 ring-red-200" },
+  warning: { label: "Warning", cls: "bg-amber-100 text-amber-700 ring-amber-200" },
+  suggestion: { label: "Suggestion", cls: "bg-sky-100 text-sky-700 ring-sky-200" },
+};
+
+function ReviewPanel({ data, images, apiBase }: { data: unknown; images?: string[]; apiBase?: string }) {
   const record = asRecord(data);
   if (!record) return <ValuePanel data={data} />;
   const findings = [record.findings, record.issues, record.recommendations].flatMap((value) => Array.isArray(value) ? value : []).filter(Boolean);
   const decision = record.decision ?? record.action ?? record.outcome;
-  return <div className="space-y-2.5"><div className="rounded-xl bg-gradient-to-r from-purple-600 to-fuchsia-600 p-3 text-white"><div className="flex items-center gap-2"><Sparkles className="size-4" /><p className="text-xs font-bold">{decision ? titleCase(String(decision)) : "Visual QA review"}</p></div>{record.summary ? <p className="mt-1.5 text-[10px] leading-relaxed text-purple-100">{String(record.summary)}</p> : null}</div>{findings.map((finding, index) => { const item = asRecord(finding); return <div key={index} className="flex gap-2 rounded-lg border border-purple-100 bg-white p-2.5"><span className="mt-0.5 text-[10px] font-bold text-purple-400">{String(index + 1).padStart(2, "0")}</span><p className="text-[11px] leading-relaxed text-zinc-700">{formatValue(item?.message ?? item?.recommendation ?? finding)}</p></div>; })}</div>;
+  const approved = record.approved === true || record.status === "approved" || record.accepted === true;
+  const score = typeof record.score === "number" ? record.score : undefined;
+  const summary = record.summary ? String(record.summary) : "";
+  const verdictCls = approved ? "from-emerald-500 to-teal-600" : "from-purple-600 to-fuchsia-600";
+  const verdictIcon = approved ? <Check className="size-4" /> : <Sparkles className="size-4" />;
+  return (
+    <div className="space-y-2.5">
+      <div className={`rounded-xl bg-gradient-to-r p-3 text-white ${verdictCls}`}>
+        <div className="flex items-center gap-2">
+          <span className="grid size-8 place-items-center rounded-full bg-white/20">{verdictIcon}</span>
+          <p className="text-xs font-bold uppercase tracking-wide">{approved ? "Approved" : (decision ? titleCase(String(decision)) : "Visual QA review")}</p>
+          {score !== undefined && <span className="ml-auto rounded-full bg-white/20 px-2 py-0.5 font-mono text-[10px] font-bold">{score}</span>}
+        </div>
+        {summary ? <p className="mt-1.5 text-[10px] leading-relaxed text-white/90">{summary}</p> : null}
+      </div>
+      {images && images.length > 0 && (
+        <ImageGallery images={images} apiBase={apiBase} />
+      )}
+      {findings.length > 0 && (
+        <div className="space-y-1.5">
+          {findings.map((finding, index) => {
+            const item = asRecord(finding);
+            const severity = String(item?.severity ?? "warning").toLowerCase();
+            const badge = SEVERITY_STYLES[severity] ?? SEVERITY_STYLES.warning;
+            const message = item?.message ?? item?.recommendation ?? item?.problem ?? finding;
+            return (
+              <div key={index} className="flex gap-2 rounded-lg border border-purple-100 bg-white p-2.5">
+                <span className={`mt-0.5 h-fit shrink-0 rounded-full px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wider ring-1 ${badge.cls}`}>{badge.label}</span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-[11px] leading-relaxed text-zinc-700">{formatValue(message)}</p>
+                  {Boolean(item?.recommendation) && String(item?.recommendation) !== String(message) && (
+                    <p className="mt-0.5 text-[10px] text-purple-600"><span className="font-semibold">Fix: </span>{formatValue(item?.recommendation)}</p>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ImageGallery({ images, apiBase }: { images: string[]; apiBase?: string }) {
+  const resolve = (src: string) => (src.startsWith("http") ? src : `${apiBase ?? ""}${src}`);
+  const [active, setActive] = useState(0);
+  const [open, setOpen] = useState(false);
+  if (!images.length) return null;
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2">
+        <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-pink-50 text-pink-600"><ImageIcon className="size-3.5" /></span>
+        <p className="text-[10px] font-bold uppercase tracking-wider text-pink-700">Rendered preview{images.length > 1 ? "s" : ""}</p>
+        <span className="ml-auto font-mono text-[9px] text-zinc-400">{images.length}</span>
+      </div>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="group relative block w-full overflow-hidden rounded-xl border border-pink-200 bg-pink-50/40"
+        aria-label="Open rendered dashboard preview"
+      >
+        <img
+          src={resolve(images[active])}
+          alt="Rendered Power BI dashboard"
+          className="max-h-96 w-full object-contain transition-transform duration-300 group-hover:scale-[1.01]"
+        />
+        {images.length > 1 && (
+          <span className="absolute bottom-2 right-2 rounded-full bg-black/60 px-2 py-0.5 font-mono text-[10px] text-white">
+            {active + 1} / {images.length}
+          </span>
+        )}
+      </button>
+      {images.length > 1 && (
+        <div className="flex gap-1.5 overflow-x-auto pb-0.5">
+          {images.map((src, index) => (
+            <button
+              key={src}
+              type="button"
+              onClick={() => setActive(index)}
+              className={`h-12 w-16 shrink-0 overflow-hidden rounded-md border-2 transition-colors ${index === active ? "border-pink-500" : "border-transparent opacity-60 hover:opacity-100"}`}
+              aria-label={`Preview ${index + 1}`}
+            >
+              <img src={resolve(src)} alt={`Preview ${index + 1}`} className="h-full w-full object-cover" />
+            </button>
+          ))}
+        </div>
+      )}
+      {open && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-6" role="dialog" aria-modal="true" onClick={() => setOpen(false)}>
+          <div className="relative max-h-full max-w-6xl overflow-auto rounded-2xl bg-white p-3 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <button onClick={() => setOpen(false)} className="absolute right-2 top-2 grid size-8 place-items-center rounded-full bg-black/60 text-white hover:bg-black/80" aria-label="Close preview"><X className="size-4" /></button>
+            <img src={resolve(images[active])} alt="Rendered Power BI dashboard (large view)" className="max-h-[80vh] w-auto object-contain" />
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function ValuePanel({ data }: { data: unknown }) {
@@ -406,7 +638,7 @@ function ValuePanel({ data }: { data: unknown }) {
   return <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">{entries.map(([key, value]) => <div key={key} className="rounded-lg border border-zinc-200 bg-white px-3 py-2"><p className="text-[9px] font-bold uppercase tracking-wider text-zinc-400">{titleCase(key)}</p><p className="mt-0.5 truncate font-mono text-[11px] text-zinc-700">{formatValue(value)}</p></div>)}</div>;
 }
 
-function ToolBody({ toolCall, data, theme }: { toolCall: ToolCall; data: unknown; theme: ToolTheme }) {
+function ToolBody({ toolCall, data, theme, apiBase }: { toolCall: ToolCall; data: unknown; theme: ToolTheme; apiBase?: string }) {
   const operation = getOperation(toolCall.arguments);
   if (theme.kind === "query") {
     const record = asRecord(data);
@@ -430,12 +662,31 @@ function ToolBody({ toolCall, data, theme }: { toolCall: ToolCall; data: unknown
       const item = asRecord(table);
       return count + (Array.isArray(item?.columns) ? item.columns.length : 0) + (Array.isArray(item?.measures) ? item.measures.length : 0);
     }, 0);
-    return <div className="grid grid-cols-2 gap-2"><Stat label="Tables" value={tables.length} /><Stat label="Report fields" value={fields} /></div>;
+    return (
+      <div className="space-y-2">
+        <div className="grid grid-cols-2 gap-2"><Stat label="Tables" value={tables.length} /><Stat label="Report fields" value={fields} /></div>
+        <div className="flex flex-wrap gap-1.5">{tables.slice(0, 24).map((table, index) => {
+          const item = asRecord(table);
+          const name = String(item?.name ?? item?.table_name ?? `Table ${index + 1}`);
+          const cols = Array.isArray(item?.columns) ? item.columns.length : 0;
+          const measures = Array.isArray(item?.measures) ? item.measures.length : 0;
+          const rowCount = typeof item?.row_count === "number" ? item.row_count : undefined;
+          return (
+            <span key={`${name}-${index}`} className="inline-flex items-center gap-1.5 rounded-lg border border-violet-200 bg-white px-2 py-1" title={name}>
+              <Table2 className="size-3 text-violet-500" />
+              <span className="max-w-40 truncate text-[10px] font-semibold text-zinc-700">{name}</span>
+              <span className="text-[9px] text-zinc-400">{cols}c{measures ? ` · ${measures}m` : ""}</span>
+              {rowCount !== undefined && <span className="rounded bg-violet-50 px-1 font-mono text-[9px] text-violet-600">{rowCount.toLocaleString()}</span>}
+            </span>
+          );
+        })}</div>
+      </div>
+    );
   }
   if (theme.kind === "validation") return <ValidationPanel data={data} />;
   if (theme.kind === "connection") return <ConnectionPanel data={data} />;
   if (toolCall.name === "list_dashboard_versions" && Array.isArray(data)) return <VersionTimeline versions={data} />;
-  if (theme.kind === "workspace") return <DashboardPanel data={data} />;
+  if (theme.kind === "workspace") return <DashboardPanel data={data} images={toolCall.images} apiBase={apiBase} />;
   if (toolCall.name === "relationship_operations") return <RelationshipPanel data={data} />;
   if (theme.kind === "model" && Array.isArray(data)) return <EntityList data={data} />;
   if (toolCall.name === "measure_operations" && ["CreateMeasure", "UpdateMeasure", "GetMeasure"].includes(operation ?? "")) {
@@ -443,10 +694,26 @@ function ToolBody({ toolCall, data, theme }: { toolCall: ToolCall; data: unknown
     return <div className="space-y-2"><div className="flex items-center gap-2 rounded-lg bg-violet-50 px-3 py-2 text-xs"><span className="font-mono font-bold text-violet-800">{request.tableName ? `${String(request.tableName)} · ` : ""}[{String(request.name ?? request.measureName ?? "Measure")}]</span>{request.formatString ? <span className="ml-auto rounded bg-white px-2 py-0.5 font-mono text-[9px] text-violet-600">{String(request.formatString)}</span> : null}</div>{request.expression ? <CodePanel code={String(request.expression)} language="DAX measure" /> : <ValuePanel data={data} />}</div>;
   }
   if (theme.kind === "render") return <ArtifactPanel data={data} />;
-  if (theme.kind === "review") return <ReviewPanel data={data} />;
+  if (theme.kind === "review") return <ReviewPanel data={data} images={toolCall.images} apiBase={apiBase} />;
   if (theme.kind === "publish") {
     const record = asRecord(data);
-    return <div className="rounded-xl border border-sky-200 bg-gradient-to-r from-sky-50 to-white p-3.5"><div className="flex items-center gap-3"><span className="grid size-9 place-items-center rounded-full bg-sky-600 text-white"><Rocket className="size-4" /></span><div className="min-w-0"><p className="text-xs font-bold text-zinc-900">Published to Microsoft Fabric</p><p className="truncate text-[10px] text-zinc-500">{formatValue(record?.display_name ?? record?.report_id ?? "Report is available in the staging workspace")}</p></div></div></div>;
+    const entries = ([
+      ["report_id", record?.report_id],
+      ["workspace_id", record?.workspace_id],
+      ["semantic_model_id", record?.semantic_model_id],
+      ["dataset_id", record?.dataset_id],
+    ] as [string, unknown][]).filter(([, value]) => typeof value === "string" && value) as [string, string][];
+    const url = record?.url ? String(record.url) : null;
+    return (
+      <div className="overflow-hidden rounded-xl border border-sky-200">
+        <div className="flex items-center gap-3 bg-gradient-to-r from-sky-600 to-cyan-600 p-3.5 text-white">
+          <span className="grid size-9 shrink-0 place-items-center rounded-full bg-white/20"><Rocket className="size-4" /></span>
+          <div className="min-w-0"><p className="text-xs font-bold">Published to Microsoft Fabric</p><p className="truncate text-[10px] text-sky-100">{formatValue(record?.display_name ?? "Report is available in the staging workspace")}</p></div>
+          {url ? <a href={url} target="_blank" rel="noreferrer" className="ml-auto inline-flex shrink-0 items-center gap-1 rounded-lg bg-white/20 px-2 py-1 text-[10px] font-semibold hover:bg-white/30" aria-label="Open report in Fabric"><ExternalLink className="size-3" /> Open</a> : null}
+        </div>
+        {entries.length > 0 && <div className="grid grid-cols-1 gap-1.5 bg-white p-3 sm:grid-cols-2">{entries.map(([label, value]) => <div key={label} className="rounded-lg bg-sky-50 px-2.5 py-1.5 ring-1 ring-sky-100"><p className="text-[8px] font-bold uppercase tracking-wider text-sky-500">{titleCase(label)}</p><p className="truncate font-mono text-[10px] text-sky-900">{value}</p></div>)}</div>}
+      </div>
+    );
   }
   if (theme.kind === "desktop") {
     const record = asRecord(data);
@@ -455,25 +722,41 @@ function ToolBody({ toolCall, data, theme }: { toolCall: ToolCall; data: unknown
   return <ValuePanel data={data} />;
 }
 
-export function ToolCallCard({ toolCall }: ToolCallCardProps) {
+export function ToolCallCard({ toolCall, apiBase }: ToolCallCardProps) {
   const [expanded, setExpanded] = useState(false);
   const data = useMemo(() => parseResult(toolCall.result), [toolCall.result]);
   const theme = getTheme(toolCall.name);
   const action = getActionSummary(toolCall, data);
   const isRunning = toolCall.status === "running" || (toolCall.status === undefined && toolCall.result === undefined && !toolCall.error);
+  const startedAtRef = useRef<number | null>(null);
+  const [elapsedMs, setElapsedMs] = useState(0);
+  useEffect(() => {
+    if (isRunning && startedAtRef.current === null) startedAtRef.current = Date.now();
+    if (!isRunning) return;
+    const tick = () => setElapsedMs(Date.now() - (startedAtRef.current ?? Date.now()));
+    tick();
+    const id = window.setInterval(tick, 500);
+    return () => window.clearInterval(id);
+  }, [isRunning]);
+  const durationMs = startedAtRef.current === null ? undefined : isRunning ? elapsedMs : Date.now() - startedAtRef.current;
 
   return (
     <article aria-live={isRunning ? "polite" : undefined} className={`relative overflow-hidden rounded-2xl border bg-white shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_24px_rgba(0,0,0,0.035)] ${toolCall.error ? "border-red-200" : theme.borderClass}`}>
       <div className="absolute inset-y-0 left-0 w-1" style={{ backgroundColor: toolCall.error ? "#dc2626" : theme.accent }} />
       <header className="flex items-center gap-3 px-4 py-3">
         <span className={`grid size-9 shrink-0 place-items-center rounded-xl border ${theme.softClass} ${theme.iconClass} ${theme.borderClass}`}>{theme.icon}</span>
-        <div className="min-w-0 flex-1"><div className="flex items-center gap-2"><p className="truncate text-xs font-bold text-zinc-900">{theme.label}</p><Status toolCall={toolCall} /></div><p className="mt-0.5 truncate text-[10px] text-zinc-500">{action}</p></div>
+        <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-1.5"><p className="truncate text-xs font-bold text-zinc-900">{theme.label}</p><Status toolCall={toolCall} durationMs={durationMs} /></div><p className="mt-0.5 truncate text-[10px] text-zinc-500">{action}</p></div>
         <button onClick={() => setExpanded((value) => !value)} className="grid size-7 shrink-0 place-items-center rounded-lg text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700" aria-expanded={expanded} aria-label="Show technical details"><ChevronDown className={`size-3.5 transition-transform ${expanded ? "rotate-180" : ""}`} /></button>
       </header>
 
       {isRunning && <div className="px-4 pb-3"><div className={`relative h-1 overflow-hidden rounded-full ${theme.softClass}`}><span className="absolute inset-y-0 w-1/3 animate-[tool-progress_1.4s_ease-in-out_infinite] rounded-full" style={{ backgroundColor: theme.accent }} /></div></div>}
       {toolCall.error && <div className="px-4 pb-3"><div className="flex gap-2.5 rounded-xl border border-red-200 bg-red-50 p-3"><AlertCircle className="mt-0.5 size-4 shrink-0 text-red-600" /><div className="min-w-0"><p className="text-[10px] font-bold uppercase tracking-wider text-red-700">Tool failed</p><p className="mt-1 text-[11px] leading-relaxed text-red-800">The agent can use this error to correct the request and retry. Technical detail:</p><pre className="mt-1 max-h-28 overflow-auto whitespace-pre-wrap font-mono text-[10px] leading-relaxed text-red-800">{toolCall.error}</pre></div></div></div>}
-      {(toolCall.status === "complete" || toolCall.result !== undefined) && !toolCall.error && <div className="px-4 pb-4"><ToolBody toolCall={toolCall} data={data} theme={theme} /></div>}
+      {(toolCall.status === "complete" || toolCall.result !== undefined) && !toolCall.error && (
+        <div className="px-4 pb-4 space-y-3">
+          <ToolBody toolCall={toolCall} data={data} theme={theme} apiBase={apiBase} />
+          {toolCall.images && toolCall.images.length > 0 && theme.kind !== "review" && theme.kind !== "workspace" && <ImageGallery images={toolCall.images} apiBase={apiBase} />}
+        </div>
+      )}
 
       {expanded && <div className="border-t border-zinc-100 bg-zinc-50/80 px-4 py-3"><div className="mb-2 flex items-center justify-between"><p className="text-[9px] font-bold uppercase tracking-[0.16em] text-zinc-400">Technical details</p><span className="font-mono text-[9px] text-zinc-400">{toolCall.name}</span></div><pre className="max-h-60 overflow-auto whitespace-pre-wrap rounded-lg border border-zinc-200 bg-white p-3 font-mono text-[10px] leading-relaxed text-zinc-600">{JSON.stringify(toolCall.arguments, null, 2)}</pre></div>}
     </article>

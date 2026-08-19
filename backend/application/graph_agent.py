@@ -5,6 +5,7 @@ import asyncio
 import json
 import logging
 import uuid
+from urllib.parse import quote
 from typing import Any, AsyncGenerator
 
 from langchain_core.messages import (
@@ -119,6 +120,44 @@ def _mcp_result_text(result: Any, max_chars: int) -> str:
         return text
     omitted = len(text) - max_chars
     return f"{text[:max_chars]}\n[tool result truncated; {omitted} characters omitted]"
+
+
+def _extract_preview_images(result_text: str) -> list[str]:
+    """Turn rendered PNG/JPEG paths inside a tool result into preview URLs.
+
+    Only paths below the git-ignored artifact roots are eligible so the browser
+    can never be pointed at arbitrary repository files.
+    """
+    try:
+        payload = json.loads(result_text)
+    except (ValueError, TypeError):
+        return []
+
+    markers = (".pbir-previews", ".dashboard-workspaces")
+    images: list[str] = []
+
+    def walk(node: Any) -> None:
+        if isinstance(node, str):
+            lowered = node.lower()
+            if not lowered.endswith((".png", ".jpg", ".jpeg", ".webp")):
+                return
+            normalized = node.replace("\\", "/")
+            for marker in markers:
+                if marker + "/" in normalized:
+                    relative = normalized.split(marker + "/", 1)[-1]
+                    rel_path = marker + "/" + relative
+                    images.append(f"/api/preview?path={quote(rel_path, safe='')}")
+                    return
+            return
+        if isinstance(node, list):
+            for item in node:
+                walk(item)
+        elif isinstance(node, dict):
+            for value in node.values():
+                walk(value)
+
+    walk(payload)
+    return list(dict.fromkeys(images))
 
 
 async def discover_powerbi_context(session: Any, tool_names: set[str]) -> str:
@@ -261,6 +300,7 @@ def build_agent_graph(
                         "id": call_id,
                         "name": name,
                         "result": text,
+                        "images": _extract_preview_images(text),
                     }
                 )
                 results.append(

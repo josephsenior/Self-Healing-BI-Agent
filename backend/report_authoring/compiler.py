@@ -147,6 +147,18 @@ def _title_objects(title: str, font_color: str) -> dict[str, Any]:
     }
 
 
+SERIES_COLOR_TYPES = {
+    "barChart", "clusteredBarChart", "stackedBarChart",
+    "hundredPercentStackedBarChart", "clusteredColumnChart",
+    "stackedColumnChart", "hundredPercentStackedColumnChart",
+    "lineChart", "areaChart", "stackedAreaChart", "ribbonChart",
+    "pieChart", "donutChart", "funnel",
+    "lineStackedColumnComboChart", "lineClusteredColumnComboChart",
+    "scatterChart", "treemap", "waterfallChart", "gauge",
+}
+CALLOUT_COLOR_TYPES = {"card", "multiRowCard", "kpi"}
+
+
 def _visual_objects(spec: VisualSpec) -> dict[str, Any] | None:
     if spec.visual_type == "textbox":
         return {"general": [{"properties": {"paragraphs": [{
@@ -156,21 +168,33 @@ def _visual_objects(spec: VisualSpec) -> dict[str, Any] | None:
             "horizontalTextAlignment": spec.text_alignment,
         }]}}]}
     if spec.visual_type == "basicShape":
-        objects: dict[str, Any] = {"general": [{"properties": {
-            "shapeType": _literal_expression(spec.shape_type),
-        }}]}
+        objects: dict[str, Any] = {"shape": [{"properties": {
+            "tileShape": _literal_expression(spec.shape_type),
+        }}], "fill": [{"properties": {
+            "fillColor": _color_expression(spec.font_color),
+        }, "selector": {"id": "default"}}], "outline": [{"properties": {
+            "show": _boolean_expression(False),
+        }, "selector": {"id": "default"}}]}
         if spec.content:
             objects["text"] = [
                 {"properties": {"show": _boolean_expression(True)}},
-                {"properties": {"text": _literal_expression(spec.content)},
-                 "selector": {"id": "default"}},
+                {"properties": {
+                    "text": _literal_expression(spec.content),
+                    "fontColor": _color_expression(spec.font_color),
+                }, "selector": {"id": "default"}},
             ]
         return objects
     if spec.visual_type == "actionButton":
-        return {"text": [
+        return {"fill": [
+            {"properties": {}},
+            {"properties": {
+                "fillColor": _color_expression(spec.font_color),
+            }, "selector": {"id": "default"}},
+        ], "text": [
             {"properties": {"show": _boolean_expression(True)}},
             {"properties": {
                 "text": _literal_expression(spec.content or spec.title),
+                "fontColor": _color_expression(spec.font_color),
                 "fontSize": {"expr": {"Literal": {"Value": f"{spec.font_size}D"}}},
                 "horizontalAlignment": _literal_expression(spec.text_alignment),
             }, "selector": {"id": "default"}},
@@ -179,17 +203,13 @@ def _visual_objects(spec: VisualSpec) -> dict[str, Any] | None:
         return {"general": [{"properties": {
             "imageUrl": _literal_expression(spec.image_url),
         }}]}
-    if spec.visual_type == "card":
+    if spec.visual_type in CALLOUT_COLOR_TYPES:
         # Card callout values do not inherit the textbox text style.  They
         # require the native cardVisual formatting object explicitly.
         return {"calloutValue": [{"properties": {
             "color": _color_expression(spec.font_color),
         }}]}
-    if spec.visual_type in {
-        "areaChart", "clusteredBarChart", "clusteredColumnChart",
-        "donutChart", "lineChart", "pieChart", "stackedBarChart",
-        "stackedColumnChart", "treemap", "waterfallChart",
-    }:
+    if spec.visual_type in SERIES_COLOR_TYPES:
         # dataPoint.fill is the native PBIR series color override.  Setting
         # dataLabels as well keeps labels legible when a custom palette is
         # requested by the dashboard specification.
@@ -232,7 +252,10 @@ def _compile_visual(
     page_targets: dict[str, str],
 ) -> dict[str, Any]:
     visual: dict[str, Any] = {
-        "visualType": "cardVisual" if spec.visual_type == "card" else spec.visual_type,
+        "visualType": {
+            "card": "cardVisual",
+            "basicShape": "shape",
+        }.get(spec.visual_type, spec.visual_type),
         "drillFilterOtherVisuals": True,
     }
     query_state = _query_state(spec)

@@ -362,6 +362,7 @@ export default function Home() {
                 key={msg.id}
                 message={msg}
                 onRetry={(text) => sendQuery(text, reasoningEffort)}
+                apiBase={backendUrls.http}
                 isStreaming={
                   agentStatus === "running" &&
                   idx === messages.length - 1 &&

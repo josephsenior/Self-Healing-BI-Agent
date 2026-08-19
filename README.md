@@ -1,5 +1,7 @@
 # Power BI MCP Agent
 
+[![CI](https://github.com/josephsenior/Data-Analysis-Agent/actions/workflows/ci.yml/badge.svg)](https://github.com/josephsenior/Data-Analysis-Agent/actions/workflows/ci.yml)
+
 An autonomous AI agent that interfaces with Microsoft's Power BI [Model Context Protocol](https://modelcontextprotocol.io/) servers — both the **remote Fabric SSE** endpoint for querying and the **local STDIO** server for semantic model editing.
 
 Built as a dual-service stack: a **Python/FastAPI backend** handles MCP client sessions and LLM orchestration, while a **Next.js/React frontend** provides a real-time streaming console with human-in-the-loop safety approvals.

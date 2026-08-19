@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from typing import Literal
 
 FieldKind = Literal["column", "measure", "any"]
@@ -175,6 +175,20 @@ VISUAL_CAPABILITIES.update({
 })
 
 VISUAL_TYPES = tuple(VISUAL_CAPABILITIES)
+
+# The compiler emits a native color override for every visual whose family
+# supports a series or callout color.  Advertise font_color on those visuals so
+# the agent knows a custom color can be requested for them.
+_COLORABLE_FAMILIES = {
+    "cartesian", "part-to-whole", "combo", "waterfall", "distribution",
+    "card", "indicator",
+}
+for _name, _capability in list(VISUAL_CAPABILITIES.items()):
+    if _capability.family in _COLORABLE_FAMILIES and "font_color" not in _capability.configuration:
+        VISUAL_CAPABILITIES[_name] = replace(
+            _capability,
+            configuration=(*_capability.configuration, "font_color"),
+        )
 
 
 def get_visual_capability(visual_type: str) -> VisualCapability:

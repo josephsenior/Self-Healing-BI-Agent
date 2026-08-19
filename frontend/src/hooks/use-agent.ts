@@ -212,12 +212,12 @@ export function useAgent(url: string): UseAgentReturn {
           const toolCalls = message.toolCalls?.map((call) => {
             if (call.id !== payload.id) return call;
             changed = true;
-            return { ...call, status: completionStatus, result: payload.result ?? "", error: payload.error };
+            return { ...call, status: completionStatus, result: payload.result ?? "", error: payload.error, images: payload.images };
           });
           const parts = message.parts?.map((part) => {
             if (part.type !== "tool_call" || part.toolCall.id !== payload.id) return part;
             changed = true;
-            return { ...part, toolCall: { ...part.toolCall, status: completionStatus, result: payload.result ?? "", error: payload.error } };
+            return { ...part, toolCall: { ...part.toolCall, status: completionStatus, result: payload.result ?? "", error: payload.error, images: payload.images } };
           });
           return changed ? { ...message, toolCalls, parts } : message;
         }));

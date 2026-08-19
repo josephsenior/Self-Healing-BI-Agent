@@ -10,6 +10,7 @@ interface ChatMessageBubbleProps {
   message: ChatMessage;
   isStreaming?: boolean; // true while this is the last message and agent is running
   onRetry?: (content: string) => void;
+  apiBase?: string;
 }
 
 // ─── Minimal Streaming Reasoning Strip ───────────────────────────────────────
@@ -105,6 +106,7 @@ export function ChatMessageBubble({
   message,
   isStreaming = false,
   onRetry,
+  apiBase,
 }: ChatMessageBubbleProps) {
   const isUser = message.role === "user";
   const [copied, setCopied] = useState(false);
@@ -172,7 +174,7 @@ export function ChatMessageBubble({
               if (part.type === "tool_call") {
                 return (
                   <div key={part.toolCall.id || `tc-${pIdx}`} className="my-1.5">
-                    <ToolCallCard toolCall={part.toolCall} />
+                    <ToolCallCard toolCall={part.toolCall} apiBase={apiBase} />
                   </div>
                 );
               }
@@ -222,7 +224,7 @@ export function ChatMessageBubble({
             {message.toolCalls && message.toolCalls.length > 0 && (
               <div className="mt-3 pt-3 border-t border-zinc-100 space-y-2">
                 {message.toolCalls.map((tc) => (
-                  <ToolCallCard key={tc.id} toolCall={tc} />
+                  <ToolCallCard key={tc.id} toolCall={tc} apiBase={apiBase} />
                 ))}
               </div>
             )}

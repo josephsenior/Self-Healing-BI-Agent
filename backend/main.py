@@ -3,8 +3,10 @@ import logging
 import asyncio
 import os
 import uuid
+from pathlib import Path
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from backend.infrastructure.redis_state import AgentStateRuntime
@@ -74,6 +76,31 @@ async def health_check():
         "transport_mode": config.transport_mode,
         "state": app.state.agent_state_runtime.health(),
     }
+
+# Rendered report artifacts are written below these git-ignored roots. Serving
+# them keeps dashboard previews visible in the browser without exposing the
+# rest of the repository.
+_ARTIFACT_ROOTS = (".pbir-previews", ".dashboard-workspaces")
+
+
+@app.get("/api/preview")
+async def preview_image(path: str):
+    """Serve a rendered dashboard/report image from the artifact roots."""
+    root = Path(ROOT_DIR).resolve()
+    target = (root / path).resolve()
+    try:
+        target.relative_to(root)
+    except ValueError:
+        return JSONResponse({"error": "path must be inside the repository"}, status_code=400)
+    if not any(
+        (root / artifact_root) in target.parents for artifact_root in _ARTIFACT_ROOTS
+    ):
+        return JSONResponse(
+            {"error": "path is not an allowed artifact location"}, status_code=400
+        )
+    if not target.is_file():
+        return JSONResponse({"error": "artifact not found"}, status_code=404)
+    return FileResponse(target)
 
 @app.on_event("shutdown")
 async def close_application_resources():

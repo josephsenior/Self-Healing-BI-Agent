@@ -17,6 +17,12 @@ out/
 build/
 .npm
 .eslintcache
+*.tsbuildinfo
+
+# Python caches
+.pytest_cache/
+.coverage
+htmlcov/
 
 # Environment variables & secrets
 .env
@@ -26,6 +32,7 @@ build/
 .env.production.local
 *.pem
 *.key
+.credentials/
 
 # IDEs
 .vscode/
@@ -42,3 +49,4 @@ build/
 .pbir-schema-cache/
 .pbir-previews/
 .dashboard-workspaces/
+static/

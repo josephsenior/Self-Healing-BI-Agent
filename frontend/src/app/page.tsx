@@ -5,7 +5,7 @@ import {
   Terminal, MessageSquare, RefreshCw, Menu, Database, Sparkles, BarChart3, AlertTriangle,
   Download, Cloud, Monitor, Palette, ShieldCheck, X, ChevronDown, ChevronUp, ChevronLeft, ChevronRight,
   Settings, Send, Mic, Paperclip, MoreHorizontal, Sun, Moon, HelpCircle, User, LogOut,
-  Bell, Search, Filter, Grid, List, ArrowRight, ArrowLeft, Maximize, Minimize
+  Bell, Search, Filter, Grid, List, ArrowRight, ArrowLeft, Maximize, Minimize, Gem
 } from "lucide-react";
 import { useAgent } from "@/hooks/use-agent";
 import { Sidebar } from "@/components/sidebar";
@@ -237,7 +237,7 @@ export default function Home() {
     const statusConfig = {
       idle: null,
       starting_agent: { label: "Preparing analysis…", icon: <RefreshCw className="w-3 h-3 animate-spin text-zinc-500" />, className: "bg-zinc-100 text-zinc-700 border-zinc-200" },
-      mcp_connected: { label: "Power BI tools ready", icon: <RefreshCw className="w-3 h-3 animate-spin text-zinc-500" />, className: "bg-zinc-100 text-zinc-700 border-zinc-200" },
+      mcp_connected: { label: "Prism tools ready", icon: <RefreshCw className="w-3 h-3 animate-spin text-zinc-500" />, className: "bg-zinc-100 text-zinc-700 border-zinc-200" },
       running: { label: "Analyzing your data…", icon: <RefreshCw className="w-3 h-3 animate-spin text-zinc-500" />, className: "bg-zinc-100 text-zinc-700 border-zinc-200" },
       complete: { label: "Analysis complete", icon: null, className: "bg-zinc-100 text-zinc-700 border-zinc-200" },
       error: { label: "Analysis needs attention", icon: null, className: "bg-red-50 text-red-700 border-red-100" },
@@ -263,8 +263,8 @@ export default function Home() {
         {/* Sidebar Header */}
         <div className="sidebar-header flex items-center justify-between">
           <div className="sidebar-logo flex items-center gap-3 flex-1 min-w-0">
-            <div className="sidebar-logo-icon"><Terminal className="w-6 h-6" /></div>
-            {!sidebarCollapsed && <span className="sidebar-logo-text truncate">Power BI Agent</span>}
+            <div className="sidebar-logo-icon bg-brand-100 p-2 rounded-lg"><Gem className="w-5 h-5 text-brand-600" /></div>
+            {!sidebarCollapsed && <span className="sidebar-logo-text truncate font-semibold text-zinc-900">Prism</span>}
           </div>
           <button
             onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
@@ -480,7 +480,7 @@ export default function Home() {
               className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 transition-colors"
             >
               <div className="w-8 h-8 rounded-full bg-brand-100 flex items-center justify-center">
-                <Terminal className="w-4 h-4 text-brand-600" />
+                <Gem className="w-4 h-4 text-brand-600" />
               </div>
               <span className="hidden sm:block text-sm font-medium">Analyst</span>
               <ChevronDown className="w-4 h-4 text-zinc-400" />
@@ -512,7 +512,7 @@ export default function Home() {
               <span className="flex items-center gap-2">
                 {connectionStatus === "error" ? <AlertTriangle className="w-4 h-4" /> : <RefreshCw className="w-4 h-4 animate-spin" />}
                 {connectionStatus === "error"
-                  ? "Power BI connection error. Your conversation is safe; reconnect to continue."
+                  ? "Prism connection error. Your conversation is safe; reconnect to continue."
                   : "Connection lost. Reconnecting automatically…"}
               </span>
               {connectionStatus === "error" && (
@@ -564,9 +564,9 @@ export default function Home() {
           >
             {messages.length === 0 ? (
               <div className="flex-1 flex flex-col items-center justify-center px-6 text-center">
-                <div className="mb-6 p-4 rounded-2xl bg-brand-50 ring-1 ring-brand-100"><Terminal className="w-10 h-10 text-brand-500" /></div>
+                <div className="mb-6 p-4 rounded-2xl bg-brand-50 ring-1 ring-brand-100"><Gem className="w-10 h-10 text-brand-500" /></div>
                 <h2 className="text-2xl font-semibold tracking-tight text-zinc-900 mb-2">What would you like to understand?</h2>
-                <p className="text-zinc-500 max-w-lg mb-8">Ask questions about your Power BI data, uncover trends, or create a report from your model.</p>
+                <p className="text-zinc-500 max-w-lg mb-8">Ask questions about your data, uncover trends, or create a report from your model.</p>
                 <div className="grid w-full max-w-2xl gap-3 sm:grid-cols-3">
                   {[
                     { icon: BarChart3, label: "Analyze performance", prompt: "Analyze my sales performance and highlight the biggest trends." },

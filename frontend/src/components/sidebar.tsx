@@ -4,7 +4,7 @@ import React, { useState, useEffect, useMemo } from "react";
 import {
   Cpu, RefreshCw, Settings, Save, X, Loader2, MessageSquarePlus, Trash2,
   ChevronRight, ChevronLeft, MessageSquare, BarChart3, Database, ShieldCheck,
-  Globe, Wifi, WifiOff, AlertCircle, CheckCircle, ExternalLink
+  Globe, Wifi, WifiOff, AlertCircle, CheckCircle, ExternalLink, Gem
 } from "lucide-react";
 import type { ConnectionStatus, AgentConfig } from "@/types";
 
@@ -209,12 +209,12 @@ export function Sidebar({
         <div className="flex items-center justify-between h-14 px-4 border-b border-zinc-200 bg-zinc-50/50 backdrop-blur-sm sticky top-0 z-10">
           <div className="flex items-center gap-3 min-w-0">
             <div className="p-2 bg-brand-100 rounded-lg flex-shrink-0">
-              <Cpu className="w-5 h-5 text-brand-600" />
+              <Gem className="w-5 h-5 text-brand-600" />
             </div>
             {!collapsed && (
               <div className="min-w-0 overflow-hidden">
-                <h1 className="font-semibold text-sm text-zinc-900 truncate">Power BI Agent</h1>
-                <p className="text-xs text-zinc-500 truncate">Autonomous Analysis</p>
+                <h1 className="font-semibold text-sm text-zinc-900 truncate">Prism</h1>
+                <p className="text-xs text-zinc-500 truncate">Intelligence Platform</p>
               </div>
             )}
           </div>

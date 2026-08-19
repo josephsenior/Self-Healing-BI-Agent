@@ -4,7 +4,7 @@ import asyncio
 import os
 import uuid
 from pathlib import Path
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -149,6 +149,201 @@ async def update_config(req: ConfigUpdateRequest):
         "sse_url": config.sse_url if config.transport_mode.upper() == "SSE" else None,
     }
 
+
+# ==============================================================================
+# DASHBOARD MANAGEMENT REST ENDPOINTS
+# ==============================================================================
+
+@app.get("/api/dashboard/active")
+async def get_active_dashboard(dashboard_id: str = ""):
+    """Get the active dashboard spec and version metadata."""
+    from backend.custom_mcp_server import _dashboard_manager
+    return json.loads(_dashboard_manager().get(dashboard_id or None, indent=2))
+
+@app.get("/api/dashboard/versions")
+async def list_dashboard_versions(dashboard_id: str = ""):
+    """List all versions for a dashboard."""
+    from backend.custom_mcp_server import _dashboard_manager
+    return json.loads(_dashboard_manager().list_versions(dashboard_id or None))
+
+@app.post("/api/dashboard/rollback")
+async def rollback_dashboard(dashboard_id: str = "", target_version: int = 0, catalog: dict | None = None):
+    """Rollback dashboard to a previous version."""
+    from backend.custom_mcp_server import _dashboard_manager, _qa_workspace_response
+    from backend.report_authoring.semantic import SemanticModelCatalog
+    
+    def op():
+        return _dashboard_manager().rollback(
+            target_version,
+            dashboard_id or None,
+            SemanticModelCatalog.model_validate(catalog) if catalog else None,
+        )
+    return json.loads(_qa_workspace_response(op))
+
+@app.post("/api/dashboard/audit")
+async def audit_dashboard(dashboard_id: str = "", catalog: dict | None = None):
+    """Audit the active dashboard."""
+    from backend.custom_mcp_server import _dashboard_manager
+    from backend.report_authoring.semantic import SemanticModelCatalog
+    
+    result = _dashboard_manager().audit(
+        dashboard_id or None,
+        SemanticModelCatalog.model_validate(catalog) if catalog else None,
+    )
+    return result
+
+@app.get("/api/dashboard/cloud-readiness")
+async def check_cloud_readiness():
+    """Check cloud publishing and visual QA readiness."""
+    import os
+    from backend.report_authoring.cloud import CloudConfig
+    
+    vision_provider = os.getenv("POWERBI_VISION_PROVIDER", os.getenv("LLM_PROVIDER", "gemini")).lower()
+    vision_key_name = {
+        "openai": "OPENAI_API_KEY",
+        "anthropic": "ANTHROPIC_API_KEY",
+        "gemini": "GEMINI_API_KEY",
+    }.get(vision_provider, "")
+    has_client_credentials = all(os.getenv(name) for name in (
+        "AZURE_TENANT_ID", "AZURE_CLIENT_ID", "AZURE_CLIENT_SECRET"
+    ))
+    checks = {
+        "workspace_id": bool(os.getenv("POWERBI_STAGING_WORKSPACE_ID")),
+        "fabric_auth": bool(os.getenv("FABRIC_API_ACCESS_TOKEN")) or has_client_credentials,
+        "powerbi_auth": bool(os.getenv("POWERBI_API_ACCESS_TOKEN")) or has_client_credentials,
+        "vision_provider": vision_provider,
+        "vision_model": bool(os.getenv("POWERBI_VISION_MODEL") or os.getenv("LLM_MODEL")),
+        "vision_api_key": bool(vision_key_name and os.getenv(vision_key_name)),
+    }
+    license_mode = os.getenv("POWERBI_CLOUD_LICENSE_MODE", "capacity").strip().lower()
+    rendering_supported = CloudConfig(
+        workspace_id=os.getenv("POWERBI_STAGING_WORKSPACE_ID", "") or "not-configured",
+        license_mode=license_mode,
+    ).supports_export_to_file
+    publishing_required = ["workspace_id", "fabric_auth"]
+    rendering_required = ["workspace_id", "powerbi_auth", "vision_model", "vision_api_key"]
+    publishing_ready = all(bool(checks[item]) for item in publishing_required)
+    visual_qa_ready = rendering_supported and all(
+        bool(checks[item]) for item in rendering_required
+    )
+    return {
+        "ready": publishing_ready,
+        "publishing_ready": publishing_ready,
+        "visual_qa_ready": visual_qa_ready,
+        "license_mode": license_mode,
+        "rendering_supported": rendering_supported,
+        "limitations": ([] if rendering_supported else [
+            "Power BI Pro/PPU supports cloud report publication, but not the "
+            "ExportToFile API used for PNG rendering and automated visual QA."
+        ]),
+        "checks": checks,
+    }
+
+@app.post("/api/dashboard/publish")
+async def publish_dashboard(project_path: str, display_name: str, semantic_model_id: str = "", report_id: str = ""):
+    """Publish PBIR to Fabric workspace."""
+    from backend.custom_mcp_server import _allowed_authoring_path
+    from backend.report_authoring.cloud import CloudConfig, FabricReportPublisher
+    
+    result = FabricReportPublisher(CloudConfig.from_env()).publish(
+        _allowed_authoring_path(project_path),
+        display_name=display_name,
+        semantic_model_id=semantic_model_id or None,
+        report_id=report_id or None,
+    )
+    return result.to_dict()
+
+@app.post("/api/dashboard/render")
+async def render_dashboard(report_id: str, page_names: list[str] | None = None, locale: str = "en-US"):
+    """Render report pages as PNG."""
+    from backend.custom_mcp_server import _allowed_authoring_path
+    from backend.report_authoring.cloud import CloudConfig, PowerBIExportRenderer
+    import uuid
+    
+    output = Path(ROOT_DIR) / ".pbir-previews" / report_id / uuid.uuid4().hex
+    result = PowerBIExportRenderer(CloudConfig.from_env()).render_report(
+        report_id,
+        output,
+        page_names=page_names or None,
+        locale=locale,
+    )
+    return result.to_dict()
+
+@app.post("/api/dashboard/review")
+async def review_render(artifact_paths: list[str], project_path: str, provider: str = "", model: str = ""):
+    """Review rendered Power BI screenshots."""
+    from backend.custom_mcp_server import _allowed_authoring_path
+    from backend.report_authoring.preview import build_preview_manifest
+    from backend.report_authoring.visual_review import review_rendered_report
+    
+    images = [_allowed_authoring_path(value) for value in artifact_paths]
+    manifest = build_preview_manifest(_allowed_authoring_path(project_path))
+    review = review_rendered_report(
+        images,
+        manifest,
+        provider=provider or None,
+        model=model or None,
+    )
+    return review.to_dict()
+
+@app.post("/api/dashboard/decide-qa")
+async def decide_qa(review: dict, attempt: int, max_attempts: int = 3):
+    """Decide visual QA iteration."""
+    from backend.report_authoring.visual_review import VisualReview, decide_visual_qa_iteration
+    
+    decision = decide_visual_qa_iteration(
+        VisualReview.model_validate(review), attempt, max_attempts
+    )
+    return decision.model_dump()
+
+@app.post("/api/dashboard/open-desktop")
+async def open_desktop(dashboard_id: str = "", semantic_model_path: str = ""):
+    """Open dashboard in Power BI Desktop."""
+    from backend.custom_mcp_server import _dashboard_manager
+    
+    result = _dashboard_manager().open_active_in_desktop(
+        dashboard_id or None, semantic_model_path or None
+    )
+    return result
+
+@app.get("/api/semantic-models")
+async def list_semantic_models():
+    """List semantic models in cloud workspace."""
+    from backend.report_authoring.cloud import CloudConfig, PowerBICloudClient
+    
+    models = PowerBICloudClient(CloudConfig.from_env()).list_semantic_models()
+    return {"semantic_models": models}
+
+@app.get("/api/semantic-models/{semantic_model_id}/catalog")
+async def get_semantic_catalog(semantic_model_id: str):
+    """Get semantic catalog for a model."""
+    from backend.report_authoring.cloud import CloudConfig, PowerBICloudClient
+    
+    catalog = PowerBICloudClient(CloudConfig.from_env()).semantic_catalog(semantic_model_id)
+    return catalog.model_dump()
+
+@app.post("/api/semantic-models/{semantic_model_id}/dax")
+async def execute_dax(semantic_model_id: str, query: str, include_nulls: bool = True):
+    """Execute DAX query against cloud model."""
+    from backend.report_authoring.cloud import CloudConfig, PowerBICloudClient
+    
+    result = PowerBICloudClient(CloudConfig.from_env()).execute_dax(
+        semantic_model_id, query, include_nulls=include_nulls
+    )
+    return result
+
+@app.post("/api/qualification/run")
+async def run_qualification(max_visual_attempts: int = 3):
+    """Run full autonomous agent qualification."""
+    from backend.report_authoring.qualification import run_full_agent_qualification
+    
+    return run_full_agent_qualification(max_visual_attempts)
+
+@app.get("/api/visual-capabilities")
+async def get_visual_capabilities():
+    """Get supported Power BI visual capabilities."""
+    from backend.report_authoring.visual_capabilities import list_visual_capabilities
+    return {"visuals": list_visual_capabilities()}
 
 # ==============================================================================
 # WEBSOCKET CHAT ENDPOINT

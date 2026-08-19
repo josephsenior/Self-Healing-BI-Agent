@@ -1,12 +1,13 @@
 "use client";
 
 import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from "react";
-import { Terminal, MessageSquare, RefreshCw, Menu, Database, Sparkles, BarChart3, AlertTriangle, Download, Cloud, Monitor, Palette, ShieldCheck } from "lucide-react";
+import { Terminal, MessageSquare, RefreshCw, Menu, Database, Sparkles, BarChart3, AlertTriangle, Download, Cloud, Monitor, Palette, ShieldCheck, X, ChevronDown, ChevronUp } from "lucide-react";
 import { useAgent } from "@/hooks/use-agent";
 import { Sidebar } from "@/components/sidebar";
 import { ChatMessageBubble } from "@/components/chat-message";
 import { ChatInput } from "@/components/chat-input";
 import { ElicitationModal } from "@/components/elicitation-modal";
+import { DashboardManager } from "@/components/dashboard-manager";
 import type { AgentConfig, ChatMessage } from "@/types";
 import type { ConversationSummary } from "@/components/sidebar";
 
@@ -27,6 +28,8 @@ function latestDashboardState(messages: ChatMessage[]) {
           version: current.version ?? value.version,
           published: part.toolCall.name === "publish_pbir_to_fabric" || Boolean(current.published),
           rendered: part.toolCall.name === "render_powerbi_report" || Boolean(current.rendered),
+          dashboard_id: String(current.dashboard_id ?? value.dashboard_id ?? ""),
+          project_path: String(current.project_path ?? value.project_path ?? ""),
         };
       } catch { /* tool result may still be streaming */ }
     }
@@ -93,6 +96,9 @@ export default function Home() {
   const [conversations, setConversations] = useState<StoredConversation[]>([]);
   const [activeConversationId, setActiveConversationId] = useState("");
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [dashboardManagerOpen, setDashboardManagerOpen] = useState(false);
+  const [dashboardId, setDashboardId] = useState<string>("");
+  const [projectPath, setProjectPath] = useState<string>("");
   const hydratedConversations = useRef(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -254,6 +260,15 @@ export default function Home() {
   const inputDisabled = connectionStatus !== "connected";
   const dashboardState = latestDashboardState(messages);
 
+  // Update dashboard manager state when dashboard info is available
+  useEffect(() => {
+    if (dashboardState?.dashboard_id) {
+      setDashboardId(dashboardState.dashboard_id);
+      setProjectPath(dashboardState.project_path);
+      setDashboardManagerOpen(true);
+    }
+  }, [dashboardState]);
+
   const statusDisplay = () => {
     switch (agentStatus) {
       case "idle":
@@ -340,6 +355,26 @@ export default function Home() {
         )}
 
         <ArtifactStatusBar state={dashboardState} onAction={(prompt) => sendQuery(prompt, reasoningEffort)} />
+
+        {/* Dashboard Manager Panel */}
+        {dashboardManagerOpen && dashboardId && projectPath && (
+          <div className="border-b border-zinc-200 bg-white">
+            <button
+              onClick={() => setDashboardManagerOpen(false)}
+              className="w-full flex items-center justify-between px-4 py-2 text-sm text-zinc-600 hover:text-zinc-900 hover:bg-zinc-50"
+            >
+              <span className="flex items-center gap-2">
+                <BarChart3 className="w-4 h-4 text-orange-500" />
+                Dashboard Manager: {dashboardState?.title || "Active Dashboard"}
+              </span>
+              <X className="w-4 h-4" />
+            </button>
+            <DashboardManager
+              dashboardId={dashboardId}
+              projectPath={projectPath}
+            />
+          </div>
+        )}
 
         {/* Scrollable messages */}
         <div

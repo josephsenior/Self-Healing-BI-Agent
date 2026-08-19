@@ -47,6 +47,94 @@ export interface AgentConfig {
   sse_url?: string | null;
 }
 
+export interface DashboardVersion {
+  version: number;
+  spec: DashboardSpec;
+  reason: string;
+  created_at: string;
+}
+
+export interface DashboardSpec {
+  title: string;
+  dataset: { path: string };
+  pages: DashboardPage[];
+}
+
+export interface DashboardPage {
+  name: string;
+  visuals: VisualSpec[];
+}
+
+export interface VisualSpec {
+  type: string;
+  title: string;
+  position: { column: number; row: number; width: number; height: number };
+  fields?: Record<string, FieldRef[]>;
+  category?: FieldRef[];
+  values?: FieldRef[];
+  series?: FieldRef;
+  font_color?: string;
+  font_size?: number;
+  text_alignment?: string;
+  content?: string;
+  shape_type?: string;
+  image_url?: string;
+  action?: { type: string; target: string };
+}
+
+export interface FieldRef {
+  table: string;
+  name: string;
+  kind?: string;
+}
+
+export interface DashboardState {
+  title: string;
+  version: number;
+  published: boolean;
+  rendered: boolean;
+  dashboard_id: string;
+}
+
+export interface CloudReadiness {
+  ready: boolean;
+  publishing_ready: boolean;
+  visual_qa_ready: boolean;
+  license_mode: string;
+  rendering_supported: boolean;
+  limitations: string[];
+  checks: Record<string, boolean>;
+}
+
+export interface VisualCapability {
+  visual_type: string;
+  family: string;
+  min_total_fields: number;
+  roles: Record<string, FieldRole>;
+  configuration: string[];
+}
+
+export interface FieldRole {
+  query_role: string;
+  min_fields: number;
+  max_fields: number;
+  field_kind: string;
+}
+
+export interface SemanticModel {
+  id: string;
+  name: string;
+  description?: string;
+}
+
+export interface QualificationResult {
+  success: boolean;
+  semantic_model_id?: string;
+  report_id?: string;
+  workspace_id?: string;
+  error?: string;
+}
+
 export type ConnectionStatus = "connecting" | "connected" | "disconnected" | "error";
 
 export type AgentStatus = "idle" | "starting_agent" | "mcp_connected" | "running" | "complete" | "cancelled" | "error";

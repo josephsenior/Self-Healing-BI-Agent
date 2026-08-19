@@ -1,8 +1,14 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { Cpu, RefreshCw, Shield, Settings, Save, X, Loader2 } from "lucide-react";
+import { Cpu, RefreshCw, Shield, Settings, Save, X, Loader2, MessageSquarePlus, Trash2 } from "lucide-react";
 import type { ConnectionStatus, AgentConfig } from "@/types";
+
+export interface ConversationSummary {
+  id: string;
+  title: string;
+  updatedAt: string;
+}
 
 interface SidebarProps {
   connectionStatus: ConnectionStatus;
@@ -12,6 +18,13 @@ interface SidebarProps {
   onConfigUpdate: (newConfig: AgentConfig) => Promise<boolean>;
   reasoningEffort: string;
   onReasoningEffortChange: (val: string) => void;
+  conversations: ConversationSummary[];
+  activeConversationId: string;
+  onSelectConversation: (id: string) => void;
+  onNewConversation: () => void;
+  onDeleteConversation: (id: string) => void;
+  mobileOpen: boolean;
+  onCloseMobile: () => void;
 }
 
 export function Sidebar({
@@ -22,6 +35,13 @@ export function Sidebar({
   onConfigUpdate,
   reasoningEffort,
   onReasoningEffortChange,
+  conversations,
+  activeConversationId,
+  onSelectConversation,
+  onNewConversation,
+  onDeleteConversation,
+  mobileOpen,
+  onCloseMobile,
 }: SidebarProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [provider, setProvider] = useState("");
@@ -40,6 +60,18 @@ export function Sidebar({
       setSseUrl(agentConfig.sse_url || "");
     }
   }, [agentConfig, isEditing]);
+
+  useEffect(() => {
+    if (!isEditing) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !isSaving) {
+        setIsEditing(false);
+        setErrorMsg("");
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [isEditing, isSaving]);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -116,7 +148,10 @@ export function Sidebar({
   };
 
   return (
-    <aside className="w-[280px] flex-shrink-0 border-r border-zinc-200 bg-zinc-50 flex flex-col justify-between h-screen overflow-hidden text-zinc-600">
+    <>
+      {mobileOpen && <button aria-label="Close sidebar" onClick={onCloseMobile} className="fixed inset-0 z-30 bg-zinc-950/20 lg:hidden" />}
+      {isEditing && <button aria-label="Close settings" onClick={() => !isSaving && setIsEditing(false)} className="fixed inset-0 z-50 bg-zinc-950/30 backdrop-blur-sm" />}
+    <aside className={`fixed inset-y-0 left-0 z-40 flex w-[290px] flex-shrink-0 flex-col justify-between overflow-hidden border-r border-zinc-200 bg-zinc-50 text-zinc-600 shadow-xl transition-transform lg:static lg:z-auto lg:h-screen lg:shadow-none ${mobileOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}`}>
       <div className="p-5 space-y-5 overflow-y-auto flex-1">
         {/* Header */}
         <div className="flex items-center gap-3">
@@ -129,10 +164,31 @@ export function Sidebar({
             </h1>
             <p className="text-[11px] text-zinc-500">Autonomous Data Analysis</p>
           </div>
+          <button onClick={onNewConversation} className="ml-auto rounded-lg border border-orange-200 bg-orange-50 p-2 text-orange-600 transition-colors hover:bg-orange-100" title="New conversation" aria-label="New conversation">
+            <MessageSquarePlus className="size-4" />
+          </button>
         </div>
 
+        <section className="space-y-2">
+          <div className="flex items-center justify-between">
+            <h2 className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">Conversations</h2>
+            <button onClick={onNewConversation} className="text-[10px] font-semibold text-orange-600 hover:text-orange-700">New</button>
+          </div>
+          <div className="space-y-1">
+            {conversations.map((conversation) => (
+              <div key={conversation.id} className={`group flex items-center gap-2 rounded-lg border px-2.5 py-2 transition-colors ${activeConversationId === conversation.id ? "border-orange-200 bg-white shadow-sm" : "border-transparent hover:border-zinc-200 hover:bg-white/70"}`}>
+                <button onClick={() => { onSelectConversation(conversation.id); onCloseMobile(); }} className="min-w-0 flex-1 text-left">
+                  <p className="truncate text-xs font-medium text-zinc-800">{conversation.title}</p>
+                  <p className="mt-0.5 text-[10px] text-zinc-400">{new Date(conversation.updatedAt).toLocaleDateString()}</p>
+                </button>
+                {conversations.length > 1 && <button onClick={() => onDeleteConversation(conversation.id)} className="rounded p-1 text-zinc-300 opacity-0 transition-opacity hover:bg-red-50 hover:text-red-500 group-hover:opacity-100" title="Delete conversation" aria-label={`Delete ${conversation.title}`}><Trash2 className="size-3.5" /></button>}
+              </div>
+            ))}
+          </div>
+        </section>
+
         {/* Connection Status */}
-        <div className="bg-white rounded-lg p-3 border border-zinc-200 shadow-sm space-y-2.5">
+        <div role={isEditing ? "dialog" : undefined} aria-modal={isEditing ? true : undefined} aria-label={isEditing ? "Agent settings" : undefined} className={`space-y-2.5 rounded-lg border border-zinc-200 bg-white p-3 shadow-sm ${isEditing ? "fixed inset-x-4 top-1/2 z-[60] mx-auto max-h-[calc(100vh-2rem)] w-auto max-w-lg -translate-y-1/2 overflow-y-auto p-5 shadow-2xl sm:inset-x-auto sm:w-[min(32rem,calc(100vw-2rem))]" : ""}`}>
           <h2 className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider">
             Connection
           </h2>
@@ -144,7 +200,7 @@ export function Sidebar({
             {(connectionStatus === "disconnected" || connectionStatus === "error") && (
               <button
                 onClick={onReconnect}
-                className="p-1.5 bg-zinc-50 hover:bg-zinc-100 text-zinc-600 hover:text-zinc-900 rounded-md border border-zinc-205 transition-colors"
+                className="rounded-md border border-zinc-200 bg-zinc-50 p-1.5 text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900"
                 title="Reconnect"
               >
                 <RefreshCw className="w-3.5 h-3.5" />
@@ -157,7 +213,7 @@ export function Sidebar({
         <div className="bg-white rounded-lg p-3 border border-zinc-200 shadow-sm space-y-2.5">
           <div className="flex items-center justify-between">
             <h2 className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider">
-              Configuration
+              Settings
             </h2>
             {agentConfig && !isEditing && (
               <button
@@ -280,7 +336,7 @@ export function Sidebar({
                 {agentConfig.transport_mode.toUpperCase() === "SSE" && agentConfig.sse_url && (
                   <div className="flex flex-col gap-0.5 pt-1 border-t border-zinc-100 mt-1">
                     <span className="text-zinc-400">SSE URL</span>
-                    <span className="font-mono text-zinc-650 truncate max-w-full text-[10px]" title={agentConfig.sse_url}>
+                    <span className="truncate font-mono text-zinc-600 max-w-full text-[10px]" title={agentConfig.sse_url}>
                       {agentConfig.sse_url}
                     </span>
                   </div>
@@ -332,7 +388,7 @@ export function Sidebar({
               {discoveredTools.map((tool) => (
                 <span
                   key={tool}
-                  className="inline-block text-[10px] font-mono bg-zinc-50 text-zinc-650 px-2 py-0.5 rounded-md mr-1 mb-1 border border-zinc-200"
+                  className="mr-1 mb-1 inline-block rounded-md border border-zinc-200 bg-zinc-50 px-2 py-0.5 font-mono text-[10px] text-zinc-600"
                 >
                   {tool}
                 </span>
@@ -350,5 +406,6 @@ export function Sidebar({
         <span>Enterprise Safety · Human-in-the-Loop</span>
       </div>
     </aside>
+    </>
   );
 }

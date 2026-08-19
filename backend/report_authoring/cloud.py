@@ -18,7 +18,7 @@ from .semantic import CatalogField, CatalogTable, SemanticModelCatalog
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-load_dotenv(PROJECT_ROOT / ".env")
+load_dotenv(PROJECT_ROOT / ".env", override=True)
 
 FABRIC_SCOPE = "https://api.fabric.microsoft.com/.default"
 POWERBI_SCOPE = "https://analysis.windows.net/powerbi/api/.default"
@@ -494,20 +494,27 @@ class PowerBIExportRenderer:
             archive = output / f"{report_id}-{export_id}.zip"
             archive.write_bytes(file_response.content)
             with zipfile.ZipFile(archive) as bundle:
+                image_index = 0
                 for member in bundle.infolist():
-                    target = (output / member.filename).resolve()
-                    try:
-                        target.relative_to(output)
-                    except ValueError as exc:
-                        raise CloudAPIError("Power BI export contained an unsafe ZIP path") from exc
                     if member.is_dir():
                         continue
+                    # ExportToFile can return opaque, very long base64-like
+                    # member names. Store PNGs under deterministic short names
+                    # so the returned artifact paths remain readable and valid
+                    # on Windows (and do not depend on ZIP naming quirks).
+                    if Path(member.filename).suffix.lower() == ".png":
+                        target = output / f"{report_id}-{image_index}.png"
+                        image_index += 1
+                    else:
+                        target = output / Path(member.filename).name
                     target.parent.mkdir(parents=True, exist_ok=True)
                     target.write_bytes(bundle.read(member))
                     if target.suffix.lower() == ".png":
                         artifacts.append(str(target))
         else:
-            image = output / f"{report_id}-{export_id}.png"
+            # Keep the local artifact name short; export IDs are opaque and can
+            # contain long base64-like strings that exceed Windows path limits.
+            image = output / f"{report_id}-0.png"
             image.write_bytes(file_response.content)
             artifacts.append(str(image))
         if not artifacts:

@@ -25,6 +25,75 @@ _QUOTED_RESOURCE = re.compile(
 )
 
 
+def _validate_m_expression(expression: list[str]) -> None:
+    """Fail closed on malformed generated Power Query M structure.
+
+    This is intentionally a structural check rather than a full M parser: it
+    catches the class of generator errors that Power BI reports only when a PBIP
+    is opened (unbalanced delimiters, especially navigation records).
+    """
+    text = "\n".join(expression)
+    pairs = {")": "(", "]": "[", "}": "{",
+    }
+    opening = set(pairs.values())
+    stack: list[tuple[str, int]] = []
+    in_string = False
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if char == '"':
+            if in_string and index + 1 < len(text) and text[index + 1] == '"':
+                index += 2
+                continue
+            in_string = not in_string
+        elif not in_string:
+            if char in opening:
+                stack.append((char, index))
+            elif char in pairs:
+                if not stack or stack[-1][0] != pairs[char]:
+                    raise ValueError(
+                        f"generated BigQuery M expression has an unexpected "
+                        f"'{char}' at character {index}"
+                    )
+                stack.pop()
+        index += 1
+    if in_string:
+        raise ValueError("generated BigQuery M expression has an unterminated string")
+    if stack:
+        delimiter, position = stack[-1]
+        raise ValueError(
+            f"generated BigQuery M expression has an unclosed '{delimiter}' "
+            f"at character {position}"
+        )
+    if not expression or expression[0].strip().lower() != "let" or not any(
+        line.strip().lower() == "in" for line in expression
+    ):
+        raise ValueError("generated BigQuery M expression must contain let/in")
+
+
+def _validate_model_definition(model: dict[str, Any]) -> None:
+    """Validate every M partition before a semantic model reaches PBIP."""
+    if not isinstance(model, dict) or not isinstance(model.get("model"), dict):
+        raise ValueError("generated semantic model has no model definition")
+    tables = model["model"].get("tables", [])
+    if not isinstance(tables, list) or not tables:
+        raise ValueError("generated semantic model has no tables")
+    for table in tables:
+        for partition in table.get("partitions", []):
+            source = partition.get("source", {})
+            if source.get("type") != "m":
+                continue
+            expression = source.get("expression")
+            if not isinstance(expression, list) or not all(
+                isinstance(line, str) for line in expression
+            ):
+                raise ValueError(
+                    f"semantic model partition {partition.get('name', '')!r} "
+                    "has an invalid M expression"
+                )
+            _validate_m_expression(expression)
+
+
 class BigQuerySettings(BaseSettings):
     project_id: str = Field(default="", alias="BIGQUERY_PROJECT_ID")
     location: str = Field(default="", alias="BIGQUERY_LOCATION")
@@ -203,15 +272,16 @@ class BigQueryService:
             f'    Project = Source{{[Name="{ref.project}"]}}[Data],',
             (
                 f'    Dataset = Project{{[Name="{ref.dataset}", '
-                'Kind="Schema"]}}[Data],'
+                'Kind="Schema"]}[Data],'
             ),
             (
                 f'    SelectedTable = Dataset{{[Name="{ref.table}", '
-                'Kind="Table"]}}[Data]'
+                'Kind="Table"]}[Data]'
             ),
             "in",
             "    SelectedTable",
         ]
+        _validate_m_expression(m_expression)
         columns = []
         for field in fields:
             column = {
@@ -250,6 +320,7 @@ class BigQueryService:
                 ],
             },
         }
+        _validate_model_definition(model)
         self._write_json(
             model_dir / "definition.pbism",
             {

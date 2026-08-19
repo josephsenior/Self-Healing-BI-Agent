@@ -126,16 +126,22 @@ def _literal_expression(value: str) -> dict[str, Any]:
     return {"expr": {"Literal": {"Value": escaped}}}
 
 
+def _color_expression(value: str) -> dict[str, Any]:
+    """Return the PBIR expression shape used by color properties."""
+    return {"solid": {"color": _literal_expression(value)}}
+
+
 def _boolean_expression(value: bool) -> dict[str, Any]:
     return {"expr": {"Literal": {"Value": str(value).lower()}}}
 
 
-def _title_objects(title: str) -> dict[str, Any]:
+def _title_objects(title: str, font_color: str) -> dict[str, Any]:
     return {
         "title": [{
             "properties": {
                 "show": _boolean_expression(True),
                 "text": _literal_expression(title),
+                "fontColor": _color_expression(font_color),
             }
         }]
     }
@@ -173,6 +179,25 @@ def _visual_objects(spec: VisualSpec) -> dict[str, Any] | None:
         return {"general": [{"properties": {
             "imageUrl": _literal_expression(spec.image_url),
         }}]}
+    if spec.visual_type == "card":
+        # Card callout values do not inherit the textbox text style.  They
+        # require the native cardVisual formatting object explicitly.
+        return {"calloutValue": [{"properties": {
+            "color": _color_expression(spec.font_color),
+        }}]}
+    if spec.visual_type in {
+        "areaChart", "clusteredBarChart", "clusteredColumnChart",
+        "donutChart", "lineChart", "pieChart", "stackedBarChart",
+        "stackedColumnChart", "treemap", "waterfallChart",
+    }:
+        # dataPoint.fill is the native PBIR series color override.  Setting
+        # dataLabels as well keeps labels legible when a custom palette is
+        # requested by the dashboard specification.
+        return {"dataPoint": [{"properties": {
+            "fill": _color_expression(spec.font_color),
+        }}], "dataLabels": [{"properties": {
+            "color": _color_expression(spec.font_color),
+        }}]}
     return None
 
 
@@ -181,7 +206,7 @@ def _container_objects(
     page_targets: dict[str, str],
 ) -> dict[str, Any] | None:
     if spec.visual_type != "actionButton":
-        return None if spec.visual_type in {"textbox", "basicShape", "image"} else _title_objects(spec.title)
+        return None if spec.visual_type in {"textbox", "basicShape", "image"} else _title_objects(spec.title, spec.font_color)
     action = spec.action
     properties = {
         "show": _boolean_expression(True),

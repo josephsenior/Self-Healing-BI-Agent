@@ -1,8 +1,16 @@
 from __future__ import annotations
 
+import json
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    field_validator,
+    model_validator,
+)
 
 from .visual_capabilities import (
     VISUAL_CAPABILITIES,
@@ -93,6 +101,20 @@ class VisualSpec(BaseModel):
     image_url: str | None = None
     action: ButtonAction | None = None
     custom_visual: CustomVisualDefinition | None = None
+
+    @field_validator("fields", mode="before")
+    @classmethod
+    def normalize_json_fields(cls, value: object) -> object:
+        """Accept JSON-object strings emitted by tool-calling models."""
+        if not isinstance(value, str):
+            return value
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError as exc:
+            raise ValueError("fields must be a JSON object") from exc
+        if not isinstance(parsed, dict):
+            raise ValueError("fields must decode to a JSON object")
+        return parsed
 
     def capability(self) -> VisualCapability:
         builtin = VISUAL_CAPABILITIES.get(self.visual_type)

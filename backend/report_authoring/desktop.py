@@ -158,6 +158,20 @@ def ensure_staging_semantic_model(
     model_dir = root / "Staging.SemanticModel"
     model_dir.mkdir(parents=True, exist_ok=True)
     pbism_file = model_dir / "definition.pbism"
+    model_bim = model_dir / "model.bim"
+    # A complete existing TMSL project is already ready for Desktop. Reusing it
+    # also avoids rewriting files that Desktop may have marked read-only.
+    if pbism_file.is_file() and model_bim.is_file():
+        return model_dir
+
+    # Power BI Desktop may convert a TMSL model.bim project to TMDL on save.
+    # Treat that converted model as authoritative and do not rewrite any of its
+    # project files; Desktop can mark them read-only while managing the PBIP.
+    tmdl_root = model_dir / "definition"
+    has_tmdl = tmdl_root.is_dir() and any(tmdl_root.rglob("*.tmdl"))
+    if has_tmdl:
+        return model_dir
+
     pbism_file.write_text(
         json.dumps({
             "$schema": SEMANTIC_MODEL_DEFINITION_SCHEMA,
@@ -166,7 +180,7 @@ def ensure_staging_semantic_model(
         }, indent=2) + "\n",
         encoding="utf-8",
     )
-    (model_dir / "model.bim").write_text(
+    model_bim.write_text(
         json.dumps(_synthetic_model(spec), indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )

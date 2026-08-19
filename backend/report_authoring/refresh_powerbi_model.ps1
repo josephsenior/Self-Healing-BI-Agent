@@ -78,27 +78,49 @@ try {
         throw 'The local Power BI model catalog did not become available.'
     }
 
-    $refresh = $connection.CreateCommand()
-    $refresh.CommandText = (@{
-        refresh = @{
-            type = 'full'
-            objects = @(@{ database = $catalog })
+    $refreshDeadline = [DateTime]::UtcNow.AddSeconds(30)
+    $refreshed = $false
+    while ([DateTime]::UtcNow -lt $refreshDeadline -and -not $refreshed) {
+        try {
+            $refresh = $connection.CreateCommand()
+            $refresh.CommandText = (@{
+                refresh = @{
+                    type = 'full'
+                    objects = @(@{ database = $catalog })
+                }
+            } | ConvertTo-Json -Depth 5 -Compress)
+            [void]$refresh.ExecuteNonQuery()
+            $refreshed = $true
         }
-    } | ConvertTo-Json -Depth 5 -Compress)
-    [void]$refresh.ExecuteNonQuery()
-
-    $escapedTable = $VerificationTable.Replace("'", "''")
-    $verify = $connection.CreateCommand()
-    $verify.CommandText = "EVALUATE ROW(`"Rows`", COUNTROWS('$escapedTable'))"
-    $reader = $verify.ExecuteReader()
-    try {
-        if (-not $reader.Read() -or $reader.IsDBNull(0)) {
-            throw "The '$VerificationTable' table remained unprocessed after refresh."
+        catch {
+            Start-Sleep -Milliseconds 1000
         }
-        $rowCount = [long]$reader.GetValue(0)
     }
-    finally {
-        $reader.Close()
+
+    $verifyDeadline = [DateTime]::UtcNow.AddSeconds(30)
+    $rowCount = $null
+    $escapedTable = $VerificationTable.Replace("'", "''")
+    while ([DateTime]::UtcNow -lt $verifyDeadline -and $null -eq $rowCount) {
+        try {
+            $verify = $connection.CreateCommand()
+            $verify.CommandText = "EVALUATE ROW(`"Rows`", COUNTROWS('$escapedTable'))"
+            $reader = $verify.ExecuteReader()
+            try {
+                if ($reader.Read() -and -not $reader.IsDBNull(0)) {
+                    $rowCount = [long]$reader.GetValue(0)
+                }
+            }
+            finally {
+                $reader.Close()
+            }
+        }
+        catch {
+            Start-Sleep -Milliseconds 1000
+        }
+    }
+
+    if ($null -eq $rowCount) {
+        throw "The '$VerificationTable' table remained unprocessed after refresh."
     }
 
     [pscustomobject]@{

@@ -74,6 +74,23 @@ class ReportAuthoringTests(unittest.TestCase):
             visual = json.loads(visual_file.read_text(encoding="utf-8"))
             self.assertIn("queryState", visual["visual"]["query"])
 
+    def test_native_visual_colors_are_emitted(self) -> None:
+        spec = sample_spec().model_copy(deep=True)
+        spec.pages[0].visuals[0].font_color = "#2563EB"
+        spec.pages[0].visuals[1].font_color = "#059669"
+        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as root:
+            result = compile_report(spec, root)
+            visuals = sorted(Path(result.report_path).glob(
+                "definition/pages/*/visuals/*/visual.json"
+            ))
+            cards = [json.loads(path.read_text(encoding="utf-8")) for path in visuals]
+            card = next(item for item in cards if item["visual"]["visualType"] == "cardVisual")
+            line = next(item for item in cards if item["visual"]["visualType"] == "lineChart")
+            card_color = card["visual"]["objects"]["calloutValue"][0]["properties"]["color"]
+            line_color = line["visual"]["objects"]["dataPoint"][0]["properties"]["fill"]
+            self.assertEqual(card_color["solid"]["color"]["expr"]["Literal"]["Value"], "'#2563EB'")
+            self.assertEqual(line_color["solid"]["color"]["expr"]["Literal"]["Value"], "'#059669'")
+
     def test_numeric_column_value_is_emitted_as_sum_aggregation(self) -> None:
         spec = DashboardSpec.model_validate({
             "title": "Aggregated Card",

@@ -65,6 +65,10 @@ Your capabilities include:
 
 **Stateful Dashboard Revision Rule**: When the user refers to the current, existing, generated, or active dashboard, do not ask them to restate its specification or the mechanical workflow. Call get_active_dashboard and audit_active_dashboard, inspect the current semantic model when useful, decide the changes needed from the user's outcome and the audit, and call revise_active_dashboard with the full revised DashboardSpec and the current version as expected_version. Preserve unrelated content, explain the revision reason, never edit generated PBIR directly, and never overwrite history. Do NOT call open_active_dashboard_in_powerbi_desktop automatically after revising or modifying a report; only call open_active_dashboard_in_powerbi_desktop if the user explicitly asks to open or view the report in Power BI Desktop. Use list_dashboard_versions or rollback_dashboard when the user asks to compare or undo changes.
 
+**Automatic Visual Inspection Rule**: If the user asks to inspect, visualize, review, diagnose, or refine the current/existing dashboard, automatically call get_active_dashboard and audit_active_dashboard, obtain the current PBIR project path, then call check_powerbi_cloud_qa_readiness. When `visual_qa_ready` is true, publish the current PBIR with publish_pbir_to_fabric if it is not already published or is stale, then call render_powerbi_report, review_powerbi_render, and decide_powerbi_visual_qa_iteration. Use the visual findings to create a complete revised DashboardSpec and call revise_active_dashboard, preserving unrelated content. Republish and rerender after each allowed revision attempt. If capacity, credentials, or publication permission is missing, report the exact blocker and do not claim visual inspection from a structural preview alone.
+
+**Cloud Readiness Truth Rule**: Never infer Pro/PPU mode from the user's license, a manually published report, or prior conversation text. Always call check_powerbi_cloud_qa_readiness and trust its current result. If it returns `visual_qa_ready: true` or `rendering_supported: true`, do not say PNG rendering is unavailable; call render_powerbi_report. Mention Pro limitations only when the live readiness result explicitly reports `license_mode` as `pro` or `ppu` and `rendering_supported: false`.
+
 **Power BI Pro Cloud Rule**: In Pro cloud mode, use list_powerbi_cloud_semantic_models, get_powerbi_cloud_semantic_catalog, and execute_powerbi_cloud_dax for capacity-independent discovery and analysis. These direct REST tools are preferred over the preview remote MCP server. Use the returned semantic catalog to ground DAX and report authoring. Service-principal queries do not support semantic models with RLS or SSO; report that limitation instead of bypassing it.
 
 **Autonomous & Zero UX Friction Rule**: NEVER ask the user to manually save a project file or provide a semantic model path before viewing or opening a report. You operate fully autonomously. All report authoring and desktop preview tools automatically manage staging semantic models. When the user asks to open, preview, or view the report, call `open_active_dashboard_in_powerbi_desktop` directly without asking the user for any file path or file saving.
@@ -243,8 +247,13 @@ async def mcp_session_scope(coordinator: ElicitationCoordinator) -> AsyncGenerat
     async with AsyncExitStack() as stack:
         sessions = []
 
-        # 1. Initialize Power BI Client Session
-        if config.transport_mode.upper() == "SSE":
+        # 1. Initialize the optional external Power BI Client Session. The
+        # in-process mode keeps all deterministic cloud/report tools available
+        # without creating Windows subprocess pipes.
+        transport_mode = config.transport_mode.upper()
+        if transport_mode in {"INPROCESS", "LOCAL", "CUSTOM"}:
+            logger.info("Using in-process Power BI helper tools only.")
+        elif transport_mode == "SSE":
             logger.info(f"Connecting to remote Power BI server via SSE: {config.sse_url}")
             headers = {}
             if config.fabric_access_token:
@@ -260,6 +269,8 @@ async def mcp_session_scope(coordinator: ElicitationCoordinator) -> AsyncGenerat
             sessions.append(pbi_session)
         else:
             stdio_cmd = config.stdio_command
+            stdio_args = list(config.stdio_args)
+            requested_npx = "npx" in Path(stdio_cmd).stem.lower()
             if os.name == "nt" and not stdio_cmd.endswith((".exe", ".cmd", ".bat")):
                 for ext in (".cmd", ".bat", ".exe"):
                     if shutil.which(stdio_cmd + ext):
@@ -269,20 +280,35 @@ async def mcp_session_scope(coordinator: ElicitationCoordinator) -> AsyncGenerat
                     default_node_npx = os.path.join("C:\\Program Files\\nodejs", stdio_cmd + ".cmd")
                     if os.path.exists(default_node_npx):
                         stdio_cmd = default_node_npx
+
+            # asyncio cannot reliably execute Windows .cmd/.bat launchers
+            # directly and raises PermissionError / WinError 5. For npx, invoke
+            # its JavaScript entry point with node.exe instead.
+            if os.name == "nt" and requested_npx:
+                node_exe = os.path.join("C:\\Program Files\\nodejs", "node.exe")
+                npx_cli = os.path.join(
+                    "C:\\Program Files\\nodejs",
+                    "node_modules", "npm", "bin", "npx-cli.js",
+                )
+                if os.path.isfile(node_exe) and os.path.isfile(npx_cli):
+                    stdio_cmd = node_exe
+                    stdio_args.insert(0, npx_cli)
             
             node_dir = r"C:\Program Files\nodejs"
             custom_env = os.environ.copy()
             custom_env["PATH"] = node_dir + os.pathsep + custom_env.get("PATH", "")
 
             logger.info(f"Connecting to local Power BI modeling server via STDIO. Executable: {stdio_cmd}")
-            is_npx = "npx" in stdio_cmd.lower()
-            use_fast_startup = is_npx and config.stdio_args and "@microsoft/powerbi-modeling-mcp" in config.stdio_args
+            is_npx = requested_npx
+            use_fast_startup = is_npx and stdio_args and "@microsoft/powerbi-modeling-mcp" in stdio_args
 
             pbi_session = None
             if use_fast_startup:
                 try:
                     logger.info("Attempting fast startup with --no-install...")
-                    fast_args = ["--no-install"] + [arg for arg in config.stdio_args if arg != "-y"]
+                    fast_args = [stdio_args[0], "--no-install"] + [
+                        arg for arg in stdio_args[1:] if arg != "-y"
+                    ]
                     server_params = StdioServerParameters(
                         command=stdio_cmd,
                         args=fast_args,
@@ -302,7 +328,7 @@ async def mcp_session_scope(coordinator: ElicitationCoordinator) -> AsyncGenerat
             if pbi_session is None:
                 server_params = StdioServerParameters(
                     command=stdio_cmd,
-                    args=config.stdio_args,
+                    args=stdio_args,
                     env=custom_env
                 )
                 read_stream, write_stream = await stack.enter_async_context(

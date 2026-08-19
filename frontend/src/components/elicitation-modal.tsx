@@ -32,9 +32,9 @@ export function ElicitationModal({ elicitation, onRespond }: ElicitationModalPro
             <ShieldAlert className="w-5 h-5 text-orange-500" />
           </div>
           <div>
-            <h3 className="font-semibold text-zinc-900 text-base">Human Approval Required</h3>
+            <h3 className="font-semibold text-zinc-900 text-base">Review before continuing</h3>
             <p className="text-[11px] text-zinc-400 uppercase tracking-wide">
-              Enterprise Write Safety Guard
+            This action may change data, publish a report, or access an external service
             </p>
           </div>
         </div>
@@ -67,7 +67,7 @@ export function ElicitationModal({ elicitation, onRespond }: ElicitationModalPro
                         }
                         className="w-4 h-4 text-orange-600 bg-white border-zinc-200 rounded focus:ring-orange-500"
                       />
-                      <span className="text-xs text-zinc-650">Enable / Approve</span>
+                      <span className="text-xs text-zinc-600">Enable / Approve</span>
                     </div>
                   ) : (
                     <input
@@ -107,17 +107,17 @@ export function ElicitationModal({ elicitation, onRespond }: ElicitationModalPro
         {/* Footer buttons */}
         <div className="flex gap-3 pt-4 border-t border-zinc-200 justify-end text-xs font-semibold">
           <button
-            onClick={() => onRespond("decline", {})}
-            className="px-4 py-2.5 bg-transparent border border-zinc-200 text-zinc-650 hover:bg-zinc-50 hover:text-zinc-900 rounded-lg transition-colors"
+            onClick={() => onRespond("cancel", {})}
+            className="rounded-lg border border-zinc-200 bg-transparent px-4 py-2.5 text-zinc-600 transition-colors hover:bg-zinc-50 hover:text-zinc-900"
           >
-            Decline
+            Cancel
           </button>
           <button
             onClick={() => onRespond("accept", formData)}
             className="px-5 py-2.5 bg-orange-500 hover:bg-orange-600 text-white border border-orange-600 rounded-lg transition-colors flex items-center gap-1.5 shadow-sm"
           >
             <CheckCircle className="w-4 h-4" />
-            <span>Approve</span>
+            <span>Continue</span>
           </button>
         </div>
       </div>

@@ -26,6 +26,8 @@ interface UseAgentReturn {
   ) => void;
   abort: () => void;
   reconnect: () => void;
+  loadConversation: (threadId: string, messages: ChatMessage[]) => void;
+  clearConversation: () => void;
 }
 
 function interruptRunningToolCalls(messages: ChatMessage[], reason: string): ChatMessage[] {
@@ -57,6 +59,7 @@ export function useAgent(url: string): UseAgentReturn {
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const shouldReconnectRef = useRef(true);
   const activeToolCallsRef = useRef<ToolCall[]>([]);
+  const threadIdRef = useRef<string | null>(null);
 
   // Keep ref in sync with state for use inside closures
   useEffect(() => {
@@ -221,9 +224,7 @@ export function useAgent(url: string): UseAgentReturn {
         break;
 
       case "thread_ready":
-        if (!window.localStorage.getItem("data-analysis-agent-thread-id")) {
-          window.localStorage.setItem("data-analysis-agent-thread-id", payload.threadId);
-        }
+        if (!threadIdRef.current) threadIdRef.current = payload.threadId;
         break;
       case "tools_discovered":
         setDiscoveredTools(payload.tools);
@@ -340,17 +341,32 @@ export function useAgent(url: string): UseAgentReturn {
     // Clear any residual state
     setActiveToolCalls([]);
 
-    // Send over WebSocket
-const storageKey = "data-analysis-agent-thread-id";
-    let threadId = window.localStorage.getItem(storageKey);
+    // Send over WebSocket using the selected persisted conversation.
+    let threadId = threadIdRef.current;
     if (!threadId) {
       threadId = crypto.randomUUID();
-      window.localStorage.setItem(storageKey, threadId);
+      threadIdRef.current = threadId;
     }
     const msg: WSOutgoingMessage = { type: "query", text, reasoningEffort, threadId };
     socketRef.current.send(JSON.stringify(msg));
 
     setAgentStatus("running");
+  }, []);
+
+  const loadConversation = useCallback((threadId: string, nextMessages: ChatMessage[]) => {
+    threadIdRef.current = threadId;
+    setMessages(nextMessages);
+    setActiveToolCalls([]);
+    setElicitation(null);
+    setAgentStatus("idle");
+  }, []);
+
+  const clearConversation = useCallback(() => {
+    threadIdRef.current = crypto.randomUUID();
+    setMessages([]);
+    setActiveToolCalls([]);
+    setElicitation(null);
+    setAgentStatus("idle");
   }, []);
 
   const respondToElicitation = useCallback(
@@ -400,5 +416,7 @@ const storageKey = "data-analysis-agent-thread-id";
     respondToElicitation,
     abort,
     reconnect,
+    loadConversation,
+    clearConversation,
   };
 }

@@ -11,7 +11,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-load_dotenv(PROJECT_ROOT / ".env")
+load_dotenv(PROJECT_ROOT / ".env", override=True)
 
 # Local development may deliberately bypass a machine-level proxy for Google
 # APIs. This is opt-in so corporate proxy deployments keep their normal route.

@@ -83,6 +83,27 @@ def _clean_json_response(value: str) -> dict[str, Any]:
     payload = json.loads(text)
     if not isinstance(payload, dict):
         raise ValueError("visual reviewer must return a JSON object")
+    # Vision models occasionally use a more specific category (for example
+    # ``clipping``) than the stable review schema. Normalize known aliases and
+    # safely bucket any future labels instead of dropping an otherwise useful
+    # visual review on Pydantic validation.
+    allowed_categories = {
+        "render_failure", "layout", "readability", "data", "formatting",
+        "accessibility", "interaction", "other",
+    }
+    category_aliases = {
+        "clipping": "readability",
+        "whitespace": "layout",
+        "trend": "data",
+    }
+    issues = payload.get("issues")
+    if isinstance(issues, list):
+        for issue in issues:
+            if isinstance(issue, dict):
+                category = str(issue.get("category", "other")).strip().lower()
+                issue["category"] = category_aliases.get(
+                    category, category if category in allowed_categories else "other"
+                )
     return payload
 
 
@@ -175,12 +196,19 @@ def review_rendered_report(
         contents.extend(
             types.Part.from_bytes(data=data, mime_type=mime) for mime, data in images
         )
-        response = genai.Client(api_key=key).models.generate_content(
-            model=selected_model,
-            contents=contents,
-            config=types.GenerateContentConfig(response_mime_type="application/json"),
-        )
-        raw = response.text or ""
+        # Keep the client alive for the whole request. Creating it inline can let
+        # its finalizer close the underlying httpx client before the transport
+        # finishes sending the multimodal request.
+        client = genai.Client(api_key=key)
+        try:
+            response = client.models.generate_content(
+                model=selected_model,
+                contents=contents,
+                config=types.GenerateContentConfig(response_mime_type="application/json"),
+            )
+            raw = response.text or ""
+        finally:
+            client.close()
     else:
         raise ValueError(f"unsupported visual review provider: {selected_provider}")
 

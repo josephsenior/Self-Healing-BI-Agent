@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
+import { AlertCircle, Check, Copy, RotateCcw } from "lucide-react";
 import type { ChatMessage } from "@/types";
 import { ToolCallCard } from "@/components/tool-call-card";
 import { MarkdownRenderer } from "@/components/markdown-renderer";
@@ -8,6 +9,7 @@ import { MarkdownRenderer } from "@/components/markdown-renderer";
 interface ChatMessageBubbleProps {
   message: ChatMessage;
   isStreaming?: boolean; // true while this is the last message and agent is running
+  onRetry?: (content: string) => void;
 }
 
 // ─── Minimal Streaming Reasoning Strip ───────────────────────────────────────
@@ -102,8 +104,10 @@ function ReasoningStrip({
 export function ChatMessageBubble({
   message,
   isStreaming = false,
+  onRetry,
 }: ChatMessageBubbleProps) {
   const isUser = message.role === "user";
+  const [copied, setCopied] = useState(false);
 
   const formattedTime = new Date(message.timestamp).toLocaleTimeString("en-US", {
     hour: "2-digit",
@@ -121,6 +125,14 @@ export function ChatMessageBubble({
   // Reasoning is actively streaming when there's reasoning text, no display content yet,
   // and the agent is currently running
   const reasoningStreaming = isStreaming && !!reasoningText && !displayContent;
+  const isError = !isUser && displayContent.toLowerCase().startsWith("system error:");
+
+  const copyResponse = async () => {
+    if (!displayContent) return;
+    await navigator.clipboard?.writeText(displayContent);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1600);
+  };
 
   return (
     <div className={`flex w-full animate-fade-in ${isUser ? "justify-end" : "justify-start"}`}>
@@ -138,7 +150,7 @@ export function ChatMessageBubble({
               isUser ? "text-orange-500" : "text-zinc-400"
             }`}
           >
-            {isUser ? "You" : "Agent"}
+            {isUser ? "You" : displayContent ? "Analysis result" : "Agent"}
           </span>
           <span className="text-[10px] text-zinc-300 font-mono">{formattedTime}</span>
         </div>
@@ -216,6 +228,13 @@ export function ChatMessageBubble({
             )}
           </>
         )}
+        {!isStreaming && (displayContent || isError) && (
+          <div className="mt-3 flex items-center gap-1 border-t border-zinc-100 pt-2 opacity-0 transition-opacity hover:opacity-100 focus-within:opacity-100 [@media(pointer:coarse)]:opacity-100">
+            {!isError && <button onClick={copyResponse} className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-medium text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700" aria-label="Copy response">{copied ? <Check className="size-3 text-emerald-600" /> : <Copy className="size-3" />}{copied ? "Copied" : "Copy"}</button>}
+            {isError && onRetry && <button onClick={() => onRetry(message.content.replace(/^System Error:\s*/i, ""))} className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-medium text-red-600 hover:bg-red-50" aria-label="Retry request"><RotateCcw className="size-3" /> Retry</button>}
+          </div>
+        )}
+        {isError && <div className="mt-2 flex items-center gap-1.5 text-[10px] text-red-600"><AlertCircle className="size-3" /> Check your connection or try again.</div>}
       </div>
     </div>
   );

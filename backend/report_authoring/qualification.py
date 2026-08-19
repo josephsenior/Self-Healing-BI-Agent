@@ -274,27 +274,31 @@ def synthetic_dashboard_spec(semantic_model_id: str) -> DashboardSpec:
                 {
                     "name": "QualificationOverview",
                     "display_name": "Qualification Overview",
+                    # Keep the qualification canvas compact so the exported
+                    # image uses the available space instead of leaving a
+                    # large empty lower region.
+                    "height": 560,
                     "visuals": [
                         {
                             "type": "card",
-                            "title": "Total Revenue",
-                            "position": {"column": 0, "row": 0, "width": 3, "height": 2},
+                            "title": "Revenue",
+                            "position": {"column": 0, "row": 0, "width": 3, "height": 3},
                             "values": [
                                 {"table": "Sales", "name": "Total Revenue", "kind": "measure"}
                             ],
                         },
                         {
                             "type": "card",
-                            "title": "Margin Percentage",
-                            "position": {"column": 3, "row": 0, "width": 3, "height": 2},
+                            "title": "Margin",
+                            "position": {"column": 3, "row": 0, "width": 3, "height": 3},
                             "values": [
                                 {"table": "Sales", "name": "Margin %", "kind": "measure"}
                             ],
                         },
                         {
                             "type": "card",
-                            "title": "Total Quantity",
-                            "position": {"column": 6, "row": 0, "width": 3, "height": 2},
+                            "title": "Units",
+                            "position": {"column": 6, "row": 0, "width": 3, "height": 3},
                             "values": [
                                 {"table": "Sales", "name": "Total Quantity", "kind": "measure"}
                             ],
@@ -302,7 +306,7 @@ def synthetic_dashboard_spec(semantic_model_id: str) -> DashboardSpec:
                         {
                             "type": "clusteredBarChart",
                             "title": "Revenue by Region",
-                            "position": {"column": 0, "row": 2, "width": 6, "height": 5},
+                            "position": {"column": 0, "row": 3, "width": 6, "height": 5},
                             "category": {"table": "Sales", "name": "Region"},
                             "values": [
                                 {"table": "Sales", "name": "Total Revenue", "kind": "measure"}
@@ -311,7 +315,7 @@ def synthetic_dashboard_spec(semantic_model_id: str) -> DashboardSpec:
                         {
                             "type": "lineChart",
                             "title": "Revenue Trend",
-                            "position": {"column": 6, "row": 2, "width": 6, "height": 5},
+                            "position": {"column": 6, "row": 3, "width": 6, "height": 5},
                             "category": {"table": "Sales", "name": "Order Date"},
                             "values": [
                                 {"table": "Sales", "name": "Total Revenue", "kind": "measure"}
@@ -320,7 +324,7 @@ def synthetic_dashboard_spec(semantic_model_id: str) -> DashboardSpec:
                         {
                             "type": "slicer",
                             "title": "Product Filter",
-                            "position": {"column": 9, "row": 0, "width": 3, "height": 2},
+                            "position": {"column": 9, "row": 0, "width": 3, "height": 3},
                             "category": {"table": "Sales", "name": "Product"},
                         },
                     ],
@@ -800,6 +804,11 @@ class FullAgentQualificationRunner:
 
     def run(self, max_visual_attempts: int = 3) -> QualificationResult:
         run_id = self.store.begin_run()
+        # PBIR definition files contain deeply nested page/visual paths. Keep the
+        # per-run artifact directory short so Windows does not hit MAX_PATH while
+        # compiling a qualification report, while retaining the full UUID in the
+        # durable qualification ledger.
+        run_slug = run_id[:8]
         result = QualificationResult(
             run_id=run_id,
             status="RUNNING",
@@ -844,7 +853,7 @@ class FullAgentQualificationRunner:
                 ]
                 if blocking:
                     raise ValueError(f"synthetic report has semantic errors: {blocking}")
-                compiled = compile_report(spec, self.root / "runs" / run_id)
+                compiled = compile_report(spec, self.root / "runs" / run_slug)
                 validation = validate_pbir_project(compiled.report_path)
                 if not validation.valid:
                     raise ValueError(
@@ -883,7 +892,7 @@ class FullAgentQualificationRunner:
 
             with self.store.step(run_id, "powerbi_render") as detail:
                 rendered = self.renderer.render_report(
-                    result.report_id, self.root / "renders" / run_id
+                    result.report_id, self.root / "renders" / run_slug
                 )
                 result.artifacts = list(rendered.artifacts)
                 result.pages_rendered = len(rendered.artifacts)

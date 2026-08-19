@@ -1,0 +1,78 @@
+{
+  "name": "sales BigQuery Model",
+  "compatibilityLevel": 1600,
+  "model": {
+    "culture": "en-US",
+    "defaultPowerBIDataSourceVersion": "powerBI_V3",
+    "discourageImplicitMeasures": true,
+    "tables": [
+      {
+        "name": "sales",
+        "description": "BigQuery source gen-lang-client-0963125551.agent_test.sales",
+        "columns": [
+          {
+            "name": "order_date",
+            "dataType": "dateTime",
+            "sourceColumn": "order_date",
+            "summarizeBy": "none",
+            "formatString": "yyyy-MM-dd"
+          },
+          {
+            "name": "country",
+            "dataType": "string",
+            "sourceColumn": "country",
+            "summarizeBy": "none"
+          },
+          {
+            "name": "product",
+            "dataType": "string",
+            "sourceColumn": "product",
+            "summarizeBy": "none"
+          },
+          {
+            "name": "channel",
+            "dataType": "string",
+            "sourceColumn": "channel",
+            "summarizeBy": "none"
+          },
+          {
+            "name": "units",
+            "dataType": "int64",
+            "sourceColumn": "units",
+            "summarizeBy": "none"
+          },
+          {
+            "name": "revenue",
+            "dataType": "double",
+            "sourceColumn": "revenue",
+            "summarizeBy": "none"
+          },
+          {
+            "name": "cost",
+            "dataType": "double",
+            "sourceColumn": "cost",
+            "summarizeBy": "none"
+          }
+        ],
+        "partitions": [
+          {
+            "name": "sales",
+            "mode": "import",
+            "source": {
+              "type": "m",
+              "expression": [
+                "let",
+                "    Source = GoogleBigQuery.Database([BillingProject=\"gen-lang-client-0963125551\", Implementation=\"2.0\", UseStorageApi=false]),",
+                "    Project = Source{[Name=\"gen-lang-client-0963125551\"]}[Data],",
+                "    Dataset = Project{[Name=\"agent_test\", Kind=\"Schema\"]}}[Data],",
+                "    SelectedTable = Dataset{[Name=\"sales\", Kind=\"Table\"]}}[Data]",
+                "in",
+                "    SelectedTable"
+              ]
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

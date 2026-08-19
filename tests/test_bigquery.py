@@ -4,7 +4,12 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-from backend.bigquery import BigQueryService, BigQuerySettings, parse_table_reference
+from backend.bigquery import (
+    BigQueryService,
+    BigQuerySettings,
+    _validate_m_expression,
+    parse_table_reference,
+)
 
 
 class _FakeIterator:
@@ -180,9 +185,21 @@ class BigQueryTests(unittest.TestCase):
         self.assertIn('BillingProject="project-one"', expression)
         self.assertIn('Implementation="2.0"', expression)
         self.assertIn("UseStorageApi=false", expression)
+        self.assertIn('Project{[Name="sales", Kind="Schema"]}[Data]', expression)
+        self.assertIn('Dataset{[Name="orders", Kind="Table"]}[Data]', expression)
+        self.assertNotIn("]}}[Data]", expression)
         self.assertNotIn("private_key", expression)
         self.assertFalse(manifest["credential_material_embedded"])
         self.assertEqual(binding.catalog["tables"][0]["name"], "orders")
+
+    def test_generated_m_expression_rejects_unbalanced_navigation(self):
+        with self.assertRaisesRegex(ValueError, "unexpected '}'"):
+            _validate_m_expression([
+                "let",
+                '    Dataset = Project{[Name="sales"]}}[Data]',
+                "in",
+                "    Dataset",
+            ])
 
     def test_powerbi_model_rejects_invalid_storage_mode(self):
         with self.assertRaises(ValueError):

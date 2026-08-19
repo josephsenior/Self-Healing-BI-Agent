@@ -1,0 +1,8 @@
+{
+  "billing_project": "gen-lang-client-0963125551",
+  "source": "gen-lang-client-0963125551.agent_test.sales",
+  "storage_mode": "import",
+  "connector_implementation": "2.0",
+  "uses_storage_api": false,
+  "credential_material_embedded": false
+}

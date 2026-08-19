@@ -188,6 +188,9 @@ function getActionSummary(toolCall: ToolCall, data: unknown): string {
   const args = toolCall.arguments;
   const result = asRecord(data);
   const complete = toolCall.status === "complete" || toolCall.result !== undefined;
+  if (toolCall.status === "failed" || toolCall.error) {
+    return `Could not complete: ${getTheme(toolCall.name).label.toLowerCase()}`;
+  }
   const table = String(args.table ?? result?.table ?? "the selected table");
   if (toolCall.name === "bigquery_list_tables") {
     const tables = Array.isArray(result?.tables) ? result.tables : [];
@@ -227,7 +230,7 @@ function Status({ toolCall }: { toolCall: ToolCall }) {
   if (toolCall.status === "cancelled") return <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-amber-700"><XCircle className="size-3" /> Interrupted</span>;
   if (toolCall.status === "failed" || toolCall.error) return <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-red-700"><XCircle className="size-3" /> Failed</span>;
   if (toolCall.status === "complete" || toolCall.result !== undefined) return <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-700"><CheckCircle2 className="size-3" /> Complete</span>;
-  return <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-zinc-500"><Clock3 className="size-3 animate-spin" /> Running</span>;
+  return <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-zinc-500"><Clock3 className="size-3 animate-spin" /> In progress</span>;
 }
 
 function CopyButton({ value }: { value: string }) {
@@ -460,7 +463,7 @@ export function ToolCallCard({ toolCall }: ToolCallCardProps) {
   const isRunning = toolCall.status === "running" || (toolCall.status === undefined && toolCall.result === undefined && !toolCall.error);
 
   return (
-    <article className={`relative overflow-hidden rounded-2xl border bg-white shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_24px_rgba(0,0,0,0.035)] ${toolCall.error ? "border-red-200" : theme.borderClass}`}>
+    <article aria-live={isRunning ? "polite" : undefined} className={`relative overflow-hidden rounded-2xl border bg-white shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_24px_rgba(0,0,0,0.035)] ${toolCall.error ? "border-red-200" : theme.borderClass}`}>
       <div className="absolute inset-y-0 left-0 w-1" style={{ backgroundColor: toolCall.error ? "#dc2626" : theme.accent }} />
       <header className="flex items-center gap-3 px-4 py-3">
         <span className={`grid size-9 shrink-0 place-items-center rounded-xl border ${theme.softClass} ${theme.iconClass} ${theme.borderClass}`}>{theme.icon}</span>
@@ -469,7 +472,7 @@ export function ToolCallCard({ toolCall }: ToolCallCardProps) {
       </header>
 
       {isRunning && <div className="px-4 pb-3"><div className={`relative h-1 overflow-hidden rounded-full ${theme.softClass}`}><span className="absolute inset-y-0 w-1/3 animate-[tool-progress_1.4s_ease-in-out_infinite] rounded-full" style={{ backgroundColor: theme.accent }} /></div></div>}
-      {toolCall.error && <div className="px-4 pb-3"><div className="flex gap-2.5 rounded-xl border border-red-200 bg-red-50 p-3"><AlertCircle className="mt-0.5 size-4 shrink-0 text-red-600" /><div><p className="text-[10px] font-bold uppercase tracking-wider text-red-700">Tool failed</p><pre className="mt-1 whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-red-800">{toolCall.error}</pre></div></div></div>}
+      {toolCall.error && <div className="px-4 pb-3"><div className="flex gap-2.5 rounded-xl border border-red-200 bg-red-50 p-3"><AlertCircle className="mt-0.5 size-4 shrink-0 text-red-600" /><div className="min-w-0"><p className="text-[10px] font-bold uppercase tracking-wider text-red-700">Tool failed</p><p className="mt-1 text-[11px] leading-relaxed text-red-800">The agent can use this error to correct the request and retry. Technical detail:</p><pre className="mt-1 max-h-28 overflow-auto whitespace-pre-wrap font-mono text-[10px] leading-relaxed text-red-800">{toolCall.error}</pre></div></div></div>}
       {(toolCall.status === "complete" || toolCall.result !== undefined) && !toolCall.error && <div className="px-4 pb-4"><ToolBody toolCall={toolCall} data={data} theme={theme} /></div>}
 
       {expanded && <div className="border-t border-zinc-100 bg-zinc-50/80 px-4 py-3"><div className="mb-2 flex items-center justify-between"><p className="text-[9px] font-bold uppercase tracking-[0.16em] text-zinc-400">Technical details</p><span className="font-mono text-[9px] text-zinc-400">{toolCall.name}</span></div><pre className="max-h-60 overflow-auto whitespace-pre-wrap rounded-lg border border-zinc-200 bg-white p-3 font-mono text-[10px] leading-relaxed text-zinc-600">{JSON.stringify(toolCall.arguments, null, 2)}</pre></div>}

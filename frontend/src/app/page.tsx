@@ -256,148 +256,32 @@ export default function Home() {
     c.title.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
+  const conversationSummaries = useMemo(
+    () => conversations.map((c) => ({ id: c.id, title: c.title, updatedAt: c.updatedAt })),
+    [conversations]
+  );
+
   return (
     <div className={`workspace ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
       {/* Sidebar */}
-      <aside className="workspace-sidebar" aria-label="Navigation">
-        {/* Sidebar Header */}
-        <div className="sidebar-header flex items-center justify-between">
-          <div className="sidebar-logo flex items-center gap-3 flex-1 min-w-0">
-            <div className="sidebar-logo-icon bg-brand-100 p-2 rounded-lg"><Gem className="w-5 h-5 text-brand-600" /></div>
-            {!sidebarCollapsed && <span className="sidebar-logo-text truncate font-semibold text-zinc-900">Prism</span>}
-          </div>
-          <button
-            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-            className="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100 transition-colors"
-            aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-          >
-            {sidebarCollapsed ? <ChevronRight className="w-5 h-5" /> : <ChevronLeft className="w-5 h-5" />}
-          </button>
-        </div>
-
-        {/* Navigation */}
-        <nav className="sidebar-section flex-1 overflow-y-auto" aria-label="Main navigation">
-          <h3 className="sidebar-section-title">
-            <span>Workspace</span>
-          </h3>
-          <div className="sidebar-nav">
-            <a href="#" className="sidebar-nav-item active" title="Analysis">
-              <MessageSquare className="icon w-5 h-5" />
-              {!sidebarCollapsed && <span>Analysis</span>}
-            </a>
-            <a href="#" className="sidebar-nav-item" title="Dashboards">
-              <BarChart3 className="icon w-5 h-5" />
-              {!sidebarCollapsed && <span>Dashboards</span>}
-            </a>
-            <a href="#" className="sidebar-nav-item" title="Models">
-              <Database className="icon w-5 h-5" />
-              {!sidebarCollapsed && <span>Semantic Models</span>}
-            </a>
-            <a href="#" className="sidebar-nav-item" title="Qualification">
-              <ShieldCheck className="icon w-5 h-5" />
-              {!sidebarCollapsed && <span>Qualification</span>}
-            </a>
-          </div>
-
-          {/* Conversations */}
-          <h3 className="sidebar-section-title">
-            <span>Conversations</span>
-            {!sidebarCollapsed && conversations.length > 0 && (
-              <span className="badge badge-primary">{conversations.length}</span>
-            )}
-          </h3>
-          <div className="sidebar-nav" style={{ maxHeight: "300px", overflow: "auto" }}>
-            {searchQuery && (
-              <div className="p-2">
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search conversations..."
-                  className="w-full px-3 py-2 text-sm border border-zinc-200 rounded-lg bg-white focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
-                />
-              </div>
-            )}
-            {filteredConversations.map((conversation) => (
-              <button
-                key={conversation.id}
-                onClick={() => selectConversation(conversation.id)}
-                className={`sidebar-nav-item ${activeConversationId === conversation.id ? "active" : ""} text-left w-full`}
-                title={conversation.title}
-              >
-                <MessageSquare className="icon w-5 h-5" />
-                {!sidebarCollapsed && (
-                  <>
-                    <span className="truncate flex-1">{conversation.title}</span>
-                    <span className="text-xs text-zinc-400 whitespace-nowrap">
-                      {new Date(conversation.updatedAt).toLocaleDateString()}
-                    </span>
-                  </>
-                )}
-              </button>
-            ))}
-            {filteredConversations.length === 0 && conversations.length > 0 && !sidebarCollapsed && (
-              <div className="px-3 py-4 text-center text-xs text-zinc-400">No conversations match</div>
-            )}
-            {!conversations.length && !sidebarCollapsed && (
-              <div className="px-3 py-4 text-center text-xs text-zinc-400">No conversations yet</div>
-            )}
-          </div>
-        </nav>
-
-        {/* New Conversation Button */}
-        {!sidebarCollapsed && (
-          <div className="sidebar-section">
-            <button
-              onClick={newConversation}
-              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-brand-50 text-brand-700 border border-brand-200 rounded-lg text-sm font-medium hover:bg-brand-100 transition-colors"
-            >
-              <MessageSquare className="w-4 h-4" />
-              <span>New Conversation</span>
-            </button>
-          </div>
-        )}
-
-        {/* Discovered Tools */}
-        <div className="sidebar-section">
-          <h3 className="sidebar-section-title">
-            <span>Discovered Tools</span>
-            {discoveredTools.length > 0 && !sidebarCollapsed && (
-              <span className="badge badge-primary">{discoveredTools.length}</span>
-            )}
-          </h3>
-          <div className="sidebar-tools">
-            {discoveredTools.map((tool) => (
-              <span key={tool} className="sidebar-tool-tag" title={tool}>
-                {sidebarCollapsed ? tool.split("_").map(w => w[0]).join("") : tool}
-              </span>
-            ))}
-            {!discoveredTools.length && !sidebarCollapsed && (
-              <span className="text-xs text-zinc-400 italic w-full text-center py-2">Connect to discover tools</span>
-            )}
-          </div>
-        </div>
-
-        {/* Sidebar Footer */}
-        <div className="sidebar-footer">
-          <div className="sidebar-status">
-            <span className={`sidebar-status-indicator ${connectionStatus}`} />
-            {!sidebarCollapsed && (
-              <span className="capitalize">
-                {connectionStatus === "connected" ? "Connected" :
-                 connectionStatus === "connecting" ? "Connecting…" :
-                 connectionStatus === "error" ? "Connection Error" : "Disconnected"}
-              </span>
-            )}
-          </div>
-          {!sidebarCollapsed && (
-            <div className="mt-3 flex items-center gap-2">
-              <button className="flex-1 px-3 py-2 text-sm font-medium text-zinc-600 hover:text-zinc-900 hover:bg-zinc-100 rounded-lg border border-zinc-200 transition-colors"
-                onClick={() => setMobileSidebarOpen(false)}>Close Sidebar</button>
-            </div>
-          )}
-        </div>
-      </aside>
+      <Sidebar
+        connectionStatus={connectionStatus}
+        agentConfig={agentConfig}
+        discoveredTools={discoveredTools}
+        onReconnect={reconnect}
+        onConfigUpdate={handleConfigUpdate}
+        reasoningEffort={reasoningEffort}
+        onReasoningEffortChange={setReasoningEffort}
+        conversations={conversationSummaries}
+        activeConversationId={activeConversationId}
+        onSelectConversation={selectConversation}
+        onNewConversation={newConversation}
+        onDeleteConversation={deleteConversation}
+        mobileOpen={mobileSidebarOpen}
+        onCloseMobile={() => setMobileSidebarOpen(false)}
+        collapsed={sidebarCollapsed}
+        onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
+      />
 
       {/* Mobile Sidebar Overlay */}
       {mobileSidebarOpen && (

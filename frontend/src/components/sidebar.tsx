@@ -206,44 +206,39 @@ export function Sidebar({
         aria-label="Navigation sidebar"
       >
         {/* Header */}
-        <div className="flex items-center justify-between h-14 px-4 border-b border-zinc-200 bg-zinc-50/50 backdrop-blur-sm sticky top-0 z-10">
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="p-2 bg-brand-100 rounded-lg flex-shrink-0">
-              <Gem className="w-5 h-5 text-brand-600" />
+        <div className="flex items-center justify-between h-14 px-4 border-b border-zinc-200 bg-white sticky top-0 z-10">
+          {!collapsed && (
+            <div className="min-w-0 overflow-hidden">
+              <h1 className="font-semibold text-sm text-zinc-900 truncate">Prism</h1>
+              <p className="text-xs text-zinc-500 truncate">Intelligence Platform</p>
             </div>
-            {!collapsed && (
-              <div className="min-w-0 overflow-hidden">
-                <h1 className="font-semibold text-sm text-zinc-900 truncate">Prism</h1>
-                <p className="text-xs text-zinc-500 truncate">Intelligence Platform</p>
-              </div>
-            )}
-          </div>
-          <button
-            onClick={onToggleCollapse}
-            className="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100 transition-colors flex-shrink-0"
-            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          >
-            {collapsed ? <ChevronRight className="w-5 h-5" /> : <ChevronLeft className="w-5 h-5" />}
-          </button>
+          )}
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 overflow-y-auto p-4 space-y-6" aria-label="Main navigation">
+        <nav className="flex-1 overflow-y-auto p-4 space-y-5" aria-label="Main navigation">
           {!collapsed && (
             <>
-              {/* New Conversation Button */}
-              <button
-                onClick={onNewConversation}
-                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-brand-50 text-brand-700 border border-brand-200 rounded-lg text-sm font-medium hover:bg-brand-100 hover:border-brand-300 transition-colors"
-              >
-                <MessageSquarePlus className="w-4 h-4" />
-                <span>New Conversation</span>
-              </button>
+              {/* Workspace Section - Prominent */}
+              <section aria-labelledby="workspace-heading" className="mb-2">
+                <h2 id="workspace-heading" className="text-xs font-semibold uppercase tracking-wider text-zinc-900 mb-3">
+                  Workspace
+                </h2>
+                <div className="space-y-1">
+                  <button
+                    onClick={onNewConversation}
+                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-zinc-700 hover:bg-zinc-100 hover:text-zinc-900 transition-colors"
+                  >
+                    <MessageSquarePlus className="w-4 h-4 text-zinc-400 flex-shrink-0" />
+                    <span>New Conversation</span>
+                  </button>
+                </div>
+              </section>
 
               {/* Conversations */}
               <section aria-labelledby="conversations-heading">
                 <div className="flex items-center justify-between mb-2">
-                  <h2 id="conversations-heading" className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
+                  <h2 id="conversations-heading" className="text-xs font-semibold uppercase tracking-wider text-zinc-900">
                     Conversations
                   </h2>
                   {conversations.length > 0 && (

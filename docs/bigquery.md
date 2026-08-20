@@ -95,3 +95,25 @@ has no external runtime dependency, and renders reliably through ExportToFile.
 Live data in the cloud requires the one-time connector authorization described
 above and is best reserved for cases where freshness on every interaction
 matters more than automation and cost.
+
+## One-time DirectQuery setup
+
+To enable live BigQuery data in Fabric, complete these steps once:
+
+1. Open the Fabric workspace in a browser:
+   `https://app.fabric.microsoft.com/groups/<WORKSPACE_ID>/list`
+
+2. Go to **Settings** → **Manage connections and gateways**.
+
+3. Click **New** → **Connection** and select **Google BigQuery**.
+
+4. Authenticate with your Google account (the same account that owns the
+   `GOOGLE_APPLICATION_CREDENTIALS` service account, or a Google Workspace
+   account with BigQuery access).
+
+5. Once the connection is created, open the semantic model
+   **"Sales Agent Test (DirectQuery)"** → **Settings** → **Data source
+   credentials** and assign the connection created in step 4.
+
+6. The report **"Tableau de Bord Ventes (DirectQuery)"** will then render
+   live data from BigQuery on every visual interaction.

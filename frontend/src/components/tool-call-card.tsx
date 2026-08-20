@@ -72,12 +72,12 @@ interface ToolCallCardProps {
 const THEMES: Record<ToolKind, Omit<ToolTheme, "label" | "icon">> = {
   query: { kind: "query", accent: "#f97316", iconClass: "text-orange-700", softClass: "bg-orange-50", borderClass: "border-orange-200" },
   code: { kind: "code", accent: "#18181b", iconClass: "text-zinc-700", softClass: "bg-zinc-100", borderClass: "border-zinc-300" },
-  connection: { kind: "connection", accent: "#2563eb", iconClass: "text-blue-700", softClass: "bg-blue-50", borderClass: "border-blue-200" },
+  connection: { kind: "connection", accent: "#ea580c", iconClass: "text-orange-700", softClass: "bg-orange-50", borderClass: "border-orange-200" },
   model: { kind: "model", accent: "#7c3aed", iconClass: "text-violet-700", softClass: "bg-violet-50", borderClass: "border-violet-200" },
   validation: { kind: "validation", accent: "#059669", iconClass: "text-emerald-700", softClass: "bg-emerald-50", borderClass: "border-emerald-200" },
-  workspace: { kind: "workspace", accent: "#4f46e5", iconClass: "text-indigo-700", softClass: "bg-indigo-50", borderClass: "border-indigo-200" },
-  desktop: { kind: "desktop", accent: "#0891b2", iconClass: "text-cyan-700", softClass: "bg-cyan-50", borderClass: "border-cyan-200" },
-  publish: { kind: "publish", accent: "#0284c7", iconClass: "text-sky-700", softClass: "bg-sky-50", borderClass: "border-sky-200" },
+  workspace: { kind: "workspace", accent: "#f97316", iconClass: "text-orange-700", softClass: "bg-orange-50", borderClass: "border-orange-200" },
+  desktop: { kind: "desktop", accent: "#f97316", iconClass: "text-orange-700", softClass: "bg-orange-50", borderClass: "border-orange-200" },
+  publish: { kind: "publish", accent: "#f97316", iconClass: "text-orange-700", softClass: "bg-orange-50", borderClass: "border-orange-200" },
   render: { kind: "render", accent: "#db2777", iconClass: "text-pink-700", softClass: "bg-pink-50", borderClass: "border-pink-200" },
   review: { kind: "review", accent: "#9333ea", iconClass: "text-purple-700", softClass: "bg-purple-50", borderClass: "border-purple-200" },
   generic: { kind: "generic", accent: "#71717a", iconClass: "text-zinc-700", softClass: "bg-zinc-50", borderClass: "border-zinc-200" },
@@ -453,9 +453,9 @@ function DashboardPanel({ data, images, apiBase }: { data: unknown; images?: str
       ? { label: "Accepted", cls: "bg-emerald-100 text-emerald-700 ring-emerald-200" }
       : null;
   return (
-    <div className="overflow-hidden rounded-xl border border-indigo-200 bg-gradient-to-br from-indigo-50 to-white">
+    <div className="overflow-hidden rounded-xl border border-orange-200 bg-gradient-to-br from-orange-50 to-white">
       <div className="flex items-start gap-3 p-3.5">
-        <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-indigo-600 text-white shadow-sm"><BarChart2 className="size-4" /></span>
+        <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-orange-600 text-white shadow-sm"><BarChart2 className="size-4" /></span>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-1.5">
             <p className="truncate text-sm font-bold text-zinc-900">{formatValue(title ?? "Power BI report")}</p>
@@ -464,19 +464,19 @@ function DashboardPanel({ data, images, apiBase }: { data: unknown; images?: str
           </div>
           <p className="mt-0.5 truncate text-[10px] text-zinc-500">{formatValue(path ?? "Dashboard workspace")}</p>
         </div>
-        {dashboard.active_version ?? current.version ?? root.version ? <span className="rounded-full bg-indigo-100 px-2 py-1 text-[10px] font-bold text-indigo-700">v{String(dashboard.active_version ?? current.version ?? root.version)}</span> : null}
+        {dashboard.active_version ?? current.version ?? root.version ? <span className="rounded-full bg-orange-100 px-2 py-1 text-[10px] font-bold text-orange-700">v{String(dashboard.active_version ?? current.version ?? root.version)}</span> : null}
       </div>
-      <div className="grid grid-cols-3 gap-1.5 border-t border-indigo-100 bg-white/60 p-2.5">
+      <div className="grid grid-cols-3 gap-1.5 border-t border-orange-100 bg-white/60 p-2.5">
         <Stat label="Pages" value={pages.length || "—"} /><Stat label="Visuals" value={visualCount || "—"} /><Stat label="Issues" value={(Array.isArray(current.quality_issues) ? current.quality_issues.length : 0) + (Array.isArray(current.semantic_issues) ? current.semantic_issues.length : 0)} />
       </div>
       {images && images.length > 0 && (
-        <div className="border-t border-indigo-100 bg-white/70 p-3">
+        <div className="border-t border-orange-100 bg-white/70 p-3">
           <ImageGallery images={images} apiBase={apiBase} />
         </div>
       )}
-      {pages.length > 0 && <div className="flex gap-2 overflow-x-auto border-t border-indigo-100 px-3 py-2.5">{pages.slice(0, 8).map((page, index) => { const item = asRecord(page); const visuals = Array.isArray(item?.visuals) ? item.visuals.length : 0; return <div key={index} className="w-28 shrink-0 rounded-lg border border-indigo-100 bg-white p-2"><div className="mb-2 grid aspect-[16/9] place-items-center rounded bg-indigo-50 text-indigo-300"><BarChart2 className="size-4" /></div><p className="truncate text-[10px] font-bold text-zinc-700">{formatValue(item?.display_name ?? item?.name ?? `Page ${index + 1}`)}</p><p className="text-[9px] text-zinc-400">{visuals} visual{visuals === 1 ? "" : "s"}</p></div>; })}</div>}
+      {pages.length > 0 && <div className="flex gap-2 overflow-x-auto border-t border-orange-100 px-3 py-2.5">{pages.slice(0, 8).map((page, index) => { const item = asRecord(page); const visuals = Array.isArray(item?.visuals) ? item.visuals.length : 0; return <div key={index} className="w-28 shrink-0 rounded-lg border border-orange-100 bg-white p-2"><div className="mb-2 grid aspect-[16/9] place-items-center rounded bg-orange-50 text-orange-300"><BarChart2 className="size-4" /></div><p className="truncate text-[10px] font-bold text-zinc-700">{formatValue(item?.display_name ?? item?.name ?? `Page ${index + 1}`)}</p><p className="text-[9px] text-zinc-400">{visuals} visual{visuals === 1 ? "" : "s"}</p></div>; })}</div>}
       {Boolean(root.candidate_manifest_path) && (
-        <div className="border-t border-indigo-100 bg-white/60 px-3 py-2">
+        <div className="border-t border-orange-100 bg-white/60 px-3 py-2">
           <p className="flex items-center gap-1.5 truncate font-mono text-[9px] text-zinc-400"><FileText className="size-3 shrink-0" />{String(root.candidate_manifest_path)}</p>
         </div>
       )}
@@ -488,11 +488,11 @@ function ConnectionPanel({ data }: { data: unknown }) {
   const items = Array.isArray(data) ? data : [data];
   const records = items.map(asRecord).filter((item): item is JsonRecord => item !== null);
   if (!records.length) return <ValuePanel data={data} />;
-  return <div className="space-y-2">{records.map((item, index) => <div key={index} className="flex items-center gap-3 rounded-xl border border-blue-200 bg-gradient-to-r from-blue-50 to-white p-3"><span className="relative grid size-9 shrink-0 place-items-center rounded-lg bg-blue-600 text-white"><Database className="size-4" /><span className="absolute -bottom-0.5 -right-0.5 size-2.5 rounded-full border-2 border-white bg-emerald-500" /></span><div className="min-w-0 flex-1"><p className="truncate text-xs font-bold text-zinc-900">{formatValue(item.connectionName ?? item.name ?? item.serverName ?? "Power BI Desktop")}</p><p className="truncate font-mono text-[10px] text-blue-700">{item.port ? `localhost:${String(item.port)}` : formatValue(item.server ?? item.database ?? "Connected")}</p></div><span className="rounded-full bg-emerald-100 px-2 py-1 text-[9px] font-bold uppercase text-emerald-700">Available</span></div>)}</div>;
+  return <div className="space-y-2">{records.map((item, index) => <div key={index} className="flex items-center gap-3 rounded-xl border border-orange-200 bg-gradient-to-r from-orange-50 to-white p-3"><span className="relative grid size-9 shrink-0 place-items-center rounded-lg bg-orange-600 text-white"><Database className="size-4" /><span className="absolute -bottom-0.5 -right-0.5 size-2.5 rounded-full border-2 border-white bg-emerald-500" /></span><div className="min-w-0 flex-1"><p className="truncate text-xs font-bold text-zinc-900">{formatValue(item.connectionName ?? item.name ?? item.serverName ?? "Power BI Desktop")}</p><p className="truncate font-mono text-[10px] text-orange-700">{item.port ? `localhost:${String(item.port)}` : formatValue(item.server ?? item.database ?? "Connected")}</p></div><span className="rounded-full bg-emerald-100 px-2 py-1 text-[9px] font-bold uppercase text-emerald-700">Available</span></div>)}</div>;
 }
 
 function VersionTimeline({ versions }: { versions: unknown[] }) {
-  return <div className="space-y-0.5">{versions.map((entry, index) => { const item = asRecord(entry) ?? {}; return <div key={index} className="flex gap-3"><div className="flex w-5 flex-col items-center"><span className={`mt-2 size-2 rounded-full ${item.active ? "bg-indigo-600 ring-4 ring-indigo-100" : "bg-zinc-300"}`} />{index < versions.length - 1 && <span className="h-full w-px bg-zinc-200" />}</div><div className="mb-2 min-w-0 flex-1 rounded-lg border border-zinc-200 bg-white px-3 py-2"><div className="flex items-center justify-between"><p className="text-[11px] font-bold text-zinc-800">Version {String(item.version ?? index + 1)}</p>{item.active ? <span className="text-[9px] font-bold uppercase text-indigo-600">Active</span> : null}</div><p className="truncate text-[10px] text-zinc-500">{String(item.reason ?? item.created_at ?? "Saved revision")}</p></div></div>; })}</div>;
+  return <div className="space-y-0.5">{versions.map((entry, index) => { const item = asRecord(entry) ?? {}; return <div key={index} className="flex gap-3"><div className="flex w-5 flex-col items-center"><span className={`mt-2 size-2 rounded-full ${item.active ? "bg-orange-600 ring-4 ring-orange-100" : "bg-zinc-300"}`} />{index < versions.length - 1 && <span className="h-full w-px bg-zinc-200" />}</div><div className="mb-2 min-w-0 flex-1 rounded-lg border border-zinc-200 bg-white px-3 py-2"><div className="flex items-center justify-between"><p className="text-[11px] font-bold text-zinc-800">Version {String(item.version ?? index + 1)}</p>{item.active ? <span className="text-[9px] font-bold uppercase text-orange-600">Active</span> : null}</div><p className="truncate text-[10px] text-zinc-500">{String(item.reason ?? item.created_at ?? "Saved revision")}</p></div></div>; })}</div>;
 }
 
 function RelationshipPanel({ data }: { data: unknown }) {
@@ -504,7 +504,7 @@ function EntityList({ data }: { data: unknown[] }) {
   const typeColor = (type: string) => {
     const value = type.toLowerCase();
     if (/(int|float|decimal|number|numeric|double)/.test(value)) return "bg-emerald-100 text-emerald-700";
-    if (/(string|varchar|char|text|name)/.test(value)) return "bg-sky-100 text-sky-700";
+    if (/(string|varchar|char|text|name)/.test(value)) return "bg-orange-100 text-orange-700";
     if (/(bool)/.test(value)) return "bg-amber-100 text-amber-700";
     if (/(date|time|timestamp|datetime)/.test(value)) return "bg-purple-100 text-purple-700";
     return "bg-violet-100 text-violet-700";
@@ -522,7 +522,7 @@ function ArtifactPanel({ data }: { data: unknown }) {
 const SEVERITY_STYLES: Record<string, { label: string; cls: string }> = {
   error: { label: "Error", cls: "bg-red-100 text-red-700 ring-red-200" },
   warning: { label: "Warning", cls: "bg-amber-100 text-amber-700 ring-amber-200" },
-  suggestion: { label: "Suggestion", cls: "bg-sky-100 text-sky-700 ring-sky-200" },
+  suggestion: { label: "Suggestion", cls: "bg-orange-100 text-orange-700 ring-orange-200" },
 };
 
 function ReviewPanel({ data, images, apiBase }: { data: unknown; images?: string[]; apiBase?: string }) {
@@ -705,19 +705,19 @@ function ToolBody({ toolCall, data, theme, apiBase }: { toolCall: ToolCall; data
     ] as [string, unknown][]).filter(([, value]) => typeof value === "string" && value) as [string, string][];
     const url = record?.url ? String(record.url) : null;
     return (
-      <div className="overflow-hidden rounded-xl border border-sky-200">
-        <div className="flex items-center gap-3 bg-gradient-to-r from-sky-600 to-cyan-600 p-3.5 text-white">
+      <div className="overflow-hidden rounded-xl border border-orange-200">
+        <div className="flex items-center gap-3 bg-gradient-to-r from-orange-600 to-amber-600 p-3.5 text-white">
           <span className="grid size-9 shrink-0 place-items-center rounded-full bg-white/20"><Rocket className="size-4" /></span>
-          <div className="min-w-0"><p className="text-xs font-bold">Published to Microsoft Fabric</p><p className="truncate text-[10px] text-sky-100">{formatValue(record?.display_name ?? "Report is available in the staging workspace")}</p></div>
+          <div className="min-w-0"><p className="text-xs font-bold">Published to Microsoft Fabric</p><p className="truncate text-[10px] text-orange-100">{formatValue(record?.display_name ?? "Report is available in the staging workspace")}</p></div>
           {url ? <a href={url} target="_blank" rel="noreferrer" className="ml-auto inline-flex shrink-0 items-center gap-1 rounded-lg bg-white/20 px-2 py-1 text-[10px] font-semibold hover:bg-white/30" aria-label="Open report in Fabric"><ExternalLink className="size-3" /> Open</a> : null}
         </div>
-        {entries.length > 0 && <div className="grid grid-cols-1 gap-1.5 bg-white p-3 sm:grid-cols-2">{entries.map(([label, value]) => <div key={label} className="rounded-lg bg-sky-50 px-2.5 py-1.5 ring-1 ring-sky-100"><p className="text-[8px] font-bold uppercase tracking-wider text-sky-500">{titleCase(label)}</p><p className="truncate font-mono text-[10px] text-sky-900">{value}</p></div>)}</div>}
+        {entries.length > 0 && <div className="grid grid-cols-1 gap-1.5 bg-white p-3 sm:grid-cols-2">{entries.map(([label, value]) => <div key={label} className="rounded-lg bg-orange-50 px-2.5 py-1.5 ring-1 ring-orange-100"><p className="text-[8px] font-bold uppercase tracking-wider text-orange-500">{titleCase(label)}</p><p className="truncate font-mono text-[10px] text-orange-900">{value}</p></div>)}</div>}
       </div>
     );
   }
   if (theme.kind === "desktop") {
     const record = asRecord(data);
-    return <div className="flex items-center gap-3 rounded-xl border border-cyan-200 bg-cyan-50 p-3"><span className="grid size-9 place-items-center rounded-lg bg-cyan-600 text-white"><Monitor className="size-4" /></span><div className="min-w-0"><p className="text-xs font-bold text-zinc-900">{record?.opened ? "Opened in Power BI Desktop" : "Desktop package prepared"}</p><p className="truncate font-mono text-[10px] text-cyan-800">{formatValue(record?.pbir_path ?? record?.report_path ?? record?.semantic_model_path)}</p></div></div>;
+    return <div className="flex items-center gap-3 rounded-xl border border-orange-200 bg-orange-50 p-3"><span className="grid size-9 place-items-center rounded-lg bg-orange-600 text-white"><Monitor className="size-4" /></span><div className="min-w-0"><p className="text-xs font-bold text-zinc-900">{record?.opened ? "Opened in Power BI Desktop" : "Desktop package prepared"}</p><p className="truncate font-mono text-[10px] text-orange-800">{formatValue(record?.pbir_path ?? record?.report_path ?? record?.semantic_model_path)}</p></div></div>;
   }
   return <ValuePanel data={data} />;
 }

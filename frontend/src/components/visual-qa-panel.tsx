@@ -108,7 +108,7 @@ export function VisualQAPanel({ dashboardId, projectPath, onRevise, onPublish }:
     switch (severity) {
       case "error": return "text-red-600 bg-red-50 border-red-200";
       case "warning": return "text-amber-600 bg-amber-50 border-amber-200";
-      case "info": return "text-blue-600 bg-blue-50 border-blue-200";
+      case "info": return "text-orange-600 bg-orange-50 border-orange-200";
       default: return "text-zinc-600 bg-zinc-50 border-zinc-200";
     }
   };
@@ -117,7 +117,7 @@ export function VisualQAPanel({ dashboardId, projectPath, onRevise, onPublish }:
     switch (severity) {
       case "error": return <XCircle className="w-3.5 h-3.5 text-red-500" />;
       case "warning": return <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />;
-      case "info": return <ShieldCheck className="w-3.5 h-3.5 text-blue-500" />;
+      case "info": return <ShieldCheck className="w-3.5 h-3.5 text-orange-500" />;
       default: return <ShieldCheck className="w-3.5 h-3.5 text-zinc-500" />;
     }
   };
@@ -178,7 +178,7 @@ export function VisualQAPanel({ dashboardId, projectPath, onRevise, onPublish }:
                   href={`/api/preview?path=${artifact}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-[11px] text-indigo-600 hover:text-indigo-700 font-mono flex items-center gap-1"
+                  className="text-[11px] text-orange-600 hover:text-orange-700 font-mono flex items-center gap-1"
                 >
                   <Image className="w-3 h-3" />
                   Page {idx + 1}
@@ -251,12 +251,12 @@ export function VisualQAPanel({ dashboardId, projectPath, onRevise, onPublish }:
         {qaDecision && (
           <div className={`p-3 rounded-lg border ${
             qaDecision.action === "accept" ? "bg-emerald-50 border-emerald-200" :
-            qaDecision.action === "revise" ? "bg-blue-50 border-blue-200" :
+            qaDecision.action === "revise" ? "bg-orange-50 border-orange-200" :
             "bg-red-50 border-red-200"
           }`}>
             <div className="flex items-center gap-2">
               {qaDecision.action === "accept" && <CheckCircle className="w-4 h-4 text-emerald-500" />}
-              {qaDecision.action === "revise" && <Palette className="w-4 h-4 text-blue-500" />}
+              {qaDecision.action === "revise" && <Palette className="w-4 h-4 text-orange-500" />}
               {qaDecision.action === "max_attempts_reached" && <XCircle className="w-4 h-4 text-red-500" />}
               <span className="text-sm font-medium text-zinc-800 capitalize">{qaDecision.action.replace("_", " ")}</span>
             </div>
@@ -264,7 +264,7 @@ export function VisualQAPanel({ dashboardId, projectPath, onRevise, onPublish }:
             {qaDecision.action === "revise" && (
               <button
                 onClick={() => handleRetry()}
-                className="mt-2 flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-medium rounded-md bg-blue-500 text-white hover:bg-blue-600 transition-colors"
+                className="mt-2 flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-medium rounded-md bg-orange-500 text-white hover:bg-orange-600 transition-colors"
               >
                 <RotateCcw className="w-3.5 h-3.5" />
                 Apply Fix & Re-Inspect

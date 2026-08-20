@@ -289,13 +289,13 @@ export function Sidebar({
           {!collapsed ? (
             <>
               <div className="flex items-center gap-2.5 min-w-0">
-                <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-blue-600 via-indigo-600 to-sky-500 flex items-center justify-center text-white shadow-xs shrink-0">
+                <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-orange-600 via-amber-600 to-yellow-500 flex items-center justify-center text-white shadow-xs shrink-0">
                   <Sparkles className="w-4 h-4" />
                 </div>
                 <div className="min-w-0">
                   <div className="flex items-center gap-1.5">
                     <span className="font-semibold text-sm tracking-tight text-zinc-900 leading-none">Data Analysis Agent</span>
-                    <span className="px-1.5 py-0.5 text-[10px] font-medium tracking-wide text-blue-700 bg-blue-50 rounded border border-blue-100/60 leading-none">
+                    <span className="px-1.5 py-0.5 text-[10px] font-medium tracking-wide text-orange-700 bg-orange-50 rounded border border-orange-100/60 leading-none">
                       AI
                     </span>
                   </div>
@@ -330,7 +330,7 @@ export function Sidebar({
               <button
                 type="button"
                 onClick={onToggleCollapse}
-                className="w-8 h-8 rounded-lg bg-gradient-to-tr from-blue-600 via-indigo-600 to-sky-500 flex items-center justify-center text-white shadow-xs hover:opacity-90 transition-opacity"
+                className="w-8 h-8 rounded-lg bg-gradient-to-tr from-orange-600 via-amber-600 to-yellow-500 flex items-center justify-center text-white shadow-xs hover:opacity-90 transition-opacity"
                 title="Expand sidebar"
                 aria-label="Expand sidebar"
               >
@@ -349,13 +349,13 @@ export function Sidebar({
                 onNewConversation();
                 if (mobileOpen) onCloseMobile();
               }}
-              className="w-full flex items-center justify-between px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs shadow-xs transition-all duration-150 active:scale-[0.99] group"
+              className="w-full flex items-center justify-between px-3 py-2 rounded-lg bg-orange-600 hover:bg-orange-700 text-white font-medium text-xs shadow-xs transition-all duration-150 active:scale-[0.99] group"
             >
               <span className="flex items-center gap-2">
-                <MessageSquarePlus className="w-4 h-4 text-blue-100 group-hover:text-white transition-colors" />
+                <MessageSquarePlus className="w-4 h-4 text-orange-100 group-hover:text-white transition-colors" />
                 <span>New Analysis</span>
               </span>
-              <span className="text-[10px] font-mono text-blue-200/80 bg-blue-700/60 px-1.5 py-0.5 rounded">
+              <span className="text-[10px] font-mono text-orange-200/80 bg-orange-700/60 px-1.5 py-0.5 rounded">
                 +
               </span>
             </button>
@@ -366,7 +366,7 @@ export function Sidebar({
                 onNewConversation();
                 if (mobileOpen) onCloseMobile();
               }}
-              className="w-10 h-10 mx-auto flex items-center justify-center rounded-lg bg-blue-600 hover:bg-blue-700 text-white shadow-xs transition-all active:scale-95"
+              className="w-10 h-10 mx-auto flex items-center justify-center rounded-lg bg-orange-600 hover:bg-orange-700 text-white shadow-xs transition-all active:scale-95"
               title="New Analysis"
               aria-label="New Analysis"
             >
@@ -383,7 +383,7 @@ export function Sidebar({
                 placeholder="Filter chats…"
                 value={searchFilter}
                 onChange={(e) => setSearchFilter(e.target.value)}
-                className="w-full pl-8 pr-6 py-1.5 text-xs bg-zinc-50 hover:bg-zinc-100/80 focus:bg-white text-zinc-800 placeholder-zinc-400 rounded-md border border-zinc-200/80 focus:border-blue-500 focus:outline-none transition-colors"
+                className="w-full pl-8 pr-6 py-1.5 text-xs bg-zinc-50 hover:bg-zinc-100/80 focus:bg-white text-zinc-800 placeholder-zinc-400 rounded-md border border-zinc-200/80 focus:border-orange-500 focus:outline-none transition-colors"
               />
               {searchFilter && (
                 <button
@@ -416,7 +416,7 @@ export function Sidebar({
                           key={conv.id}
                           className={`group relative flex items-center gap-2 px-2.5 py-2 rounded-lg cursor-pointer transition-all duration-150 ${
                             isActive
-                              ? "bg-blue-50/90 text-blue-900 font-medium"
+                              ? "bg-orange-50/90 text-orange-900 font-medium"
                               : "text-zinc-600 hover:bg-zinc-100/80 hover:text-zinc-900"
                           }`}
                           onClick={() => {
@@ -434,7 +434,7 @@ export function Sidebar({
                         >
                           <MessageSquare
                             className={`w-3.5 h-3.5 shrink-0 transition-colors ${
-                              isActive ? "text-blue-600" : "text-zinc-400 group-hover:text-zinc-600"
+                              isActive ? "text-orange-600" : "text-zinc-400 group-hover:text-zinc-600"
                             }`}
                           />
                           <div className="min-w-0 flex-1">
@@ -490,7 +490,7 @@ export function Sidebar({
                     }}
                     className={`w-9 h-9 mx-auto flex items-center justify-center rounded-lg transition-colors ${
                       isActive
-                        ? "bg-blue-50 text-blue-600 ring-1 ring-blue-200"
+                        ? "bg-orange-50 text-orange-600 ring-1 ring-orange-200"
                         : "text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100"
                     }`}
                     title={conv.title}
@@ -569,7 +569,7 @@ export function Sidebar({
                   <button
                     type="button"
                     onClick={onReconnect}
-                    className="p-1.5 rounded-md text-zinc-500 hover:text-blue-600 hover:bg-white border border-transparent hover:border-zinc-200 transition-colors shadow-2xs"
+                    className="p-1.5 rounded-md text-zinc-500 hover:text-orange-600 hover:bg-white border border-transparent hover:border-zinc-200 transition-colors shadow-2xs"
                     title="Reconnect"
                     aria-label="Reconnect"
                   >
@@ -631,7 +631,7 @@ export function Sidebar({
             {/* Modal Header */}
             <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-100 bg-zinc-50/50">
               <div className="flex items-center gap-2.5">
-                <div className="w-7 h-7 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center border border-blue-100">
+                <div className="w-7 h-7 rounded-lg bg-orange-50 text-orange-600 flex items-center justify-center border border-orange-100">
                   <SlidersHorizontal className="w-4 h-4" />
                 </div>
                 <div>
@@ -671,7 +671,7 @@ export function Sidebar({
                   value={provider}
                   onChange={(e) => handleProviderChange(e.target.value)}
                   disabled={isSaving}
-                  className="w-full px-3 py-2 text-xs bg-zinc-50 hover:bg-zinc-100/60 focus:bg-white border border-zinc-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-colors"
+                  className="w-full px-3 py-2 text-xs bg-zinc-50 hover:bg-zinc-100/60 focus:bg-white border border-zinc-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-colors"
                 >
                   <option value="gemini">Google Gemini</option>
                   <option value="openai">OpenAI</option>
@@ -688,7 +688,7 @@ export function Sidebar({
                   onChange={(e) => setModel(e.target.value)}
                   disabled={isSaving}
                   placeholder="e.g. gemini-3.5-flash or gpt-4o"
-                  className="w-full px-3 py-2 text-xs bg-zinc-50 hover:bg-zinc-100/60 focus:bg-white border border-zinc-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-colors font-mono"
+                    className="w-full px-3 py-2 text-xs bg-zinc-50 hover:bg-zinc-100/60 focus:bg-white border border-zinc-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-colors font-mono"
                 />
               </div>
 
@@ -699,7 +699,7 @@ export function Sidebar({
                   value={transport}
                   onChange={(e) => setTransport(e.target.value)}
                   disabled={isSaving}
-                  className="w-full px-3 py-2 text-xs bg-zinc-50 hover:bg-zinc-100/60 focus:bg-white border border-zinc-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-colors"
+                  className="w-full px-3 py-2 text-xs bg-zinc-50 hover:bg-zinc-100/60 focus:bg-white border border-zinc-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-colors"
                 >
                   <option value="STDIO">STDIO (Standard Process)</option>
                   <option value="SSE">SSE (Server-Sent Events)</option>
@@ -716,7 +716,7 @@ export function Sidebar({
                     onChange={(e) => setSseUrl(e.target.value)}
                     disabled={isSaving}
                     placeholder="http://localhost:8000/sse"
-                    className="w-full px-3 py-2 text-xs bg-zinc-50 hover:bg-zinc-100/60 focus:bg-white border border-zinc-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-colors font-mono"
+                  className="w-full px-3 py-2 text-xs bg-zinc-50 hover:bg-zinc-100/60 focus:bg-white border border-zinc-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-colors font-mono"
                   />
                 </div>
               )}
@@ -737,7 +737,7 @@ export function Sidebar({
                 <button
                   type="submit"
                   disabled={isSaving}
-                  className="flex items-center gap-1.5 px-4 py-2 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 active:scale-98 rounded-lg shadow-xs transition-all disabled:opacity-50"
+                  className="flex items-center gap-1.5 px-4 py-2 text-xs font-medium text-white bg-orange-600 hover:bg-orange-700 active:scale-98 rounded-lg shadow-xs transition-all disabled:opacity-50"
                 >
                   {isSaving ? (
                     <>

@@ -117,7 +117,7 @@ export function DashboardManager({ dashboardId, projectPath, initialSpec, initia
             {state && (
               <>
                 {state.version != null && (
-                  <span className="px-2 py-0.5 text-[10px] font-semibold text-indigo-700 bg-indigo-50 rounded border border-indigo-200">
+                  <span className="px-2 py-0.5 text-[10px] font-semibold text-orange-700 bg-orange-50 rounded border border-orange-200">
                     v{state.version}
                   </span>
                 )}
@@ -127,7 +127,7 @@ export function DashboardManager({ dashboardId, projectPath, initialSpec, initia
                   </span>
                 )}
                 {state.rendered && (
-                  <span className="px-2 py-0.5 text-[10px] font-semibold text-blue-700 bg-blue-50 rounded border border-blue-200 flex items-center gap-1">
+                   <span className="px-2 py-0.5 text-[10px] font-semibold text-orange-700 bg-orange-50 rounded border border-orange-200 flex items-center gap-1">
                     <ShieldCheck className="w-3 h-3" /> QA Done
                   </span>
                 )}

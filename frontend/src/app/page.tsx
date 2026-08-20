@@ -417,7 +417,7 @@ export default function Home() {
                   <p className="font-semibold text-zinc-900 text-sm truncate max-w-[300px]">{dashboardState.title}</p>
                   <p className="text-xs text-zinc-500 flex items-center gap-2">
                       {dashboardState.version != null ? (
-                        <span className="px-1.5 py-0.5 text-[9px] font-semibold text-indigo-700 bg-indigo-50 rounded border border-indigo-100">
+                        <span className="px-1.5 py-0.5 text-[9px] font-semibold text-orange-700 bg-orange-50 rounded border border-orange-100">
                           v{String(dashboardState.version)}
                         </span>
                       ) : null}
@@ -426,7 +426,7 @@ export default function Home() {
                         {dashboardState.published ? "Published" : "Not published"}
                       </span>
                       {dashboardState.rendered ? (
-                        <span className="flex items-center gap-1 text-blue-600">
+                        <span className="flex items-center gap-1 text-orange-600">
                           <ShieldCheck className="w-3 h-3" /> QA Done
                         </span>
                       ) : null}

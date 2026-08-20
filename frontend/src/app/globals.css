@@ -119,11 +119,11 @@
    These must live in globals.css to prevent
    Tailwind from purging them at build time.
    ========================================== */
-.syntax-keyword   { color: #38bdf8 !important; font-weight: 600; }
+.syntax-keyword   { color: #fb923c !important; font-weight: 600; }
 .syntax-string    { color: #34d399 !important; }
 .syntax-number    { color: #fbbf24 !important; }
 .syntax-comment   { color: #71717a !important; font-style: italic; }
 .syntax-generic-keyword { color: #fb923c !important; font-weight: 600; }
-.syntax-json-key  { color: #38bdf8 !important; font-weight: 600; }
+.syntax-json-key  { color: #fb923c !important; font-weight: 600; }
 .syntax-json-bool { color: #fb923c !important; font-weight: 600; }
 .syntax-json-null { color: #71717a !important; }

@@ -119,7 +119,7 @@ export function PublishPanel({
   if (!readiness) {
     return (
       <div className="flex flex-col items-center justify-center py-12 text-center">
-        <RotateCcw className="w-6 h-6 text-blue-500 animate-spin mb-2" />
+        <RotateCcw className="w-6 h-6 text-orange-500 animate-spin mb-2" />
         <p className="text-xs text-zinc-500 font-medium">Checking Microsoft Fabric cloud readiness…</p>
       </div>
     );
@@ -136,7 +136,7 @@ export function PublishPanel({
       {/* Header */}
       <div className="px-4 py-3 border-b border-zinc-100 bg-zinc-50/70 flex items-center justify-between">
         <div className="flex items-center gap-2.5">
-          <div className="w-7 h-7 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center border border-blue-100">
+          <div className="w-7 h-7 rounded-lg bg-orange-50 text-orange-600 flex items-center justify-center border border-orange-100">
             <Cloud className="w-4 h-4" />
           </div>
           <div>
@@ -203,7 +203,7 @@ export function PublishPanel({
               value={customReportName}
               onChange={(e) => setCustomReportName(e.target.value)}
               placeholder="e.g. Executive Sales Performance"
-              className="w-full px-3 py-1.5 text-xs bg-white border border-zinc-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-colors"
+              className="w-full px-3 py-1.5 text-xs bg-white border border-zinc-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-colors"
             />
           </div>
 
@@ -217,7 +217,7 @@ export function PublishPanel({
               value={semanticModelId}
               onChange={(e) => setSemanticModelId(e.target.value)}
               placeholder="UUID of target Fabric semantic model (if re-binding)"
-              className="w-full px-3 py-1.5 text-xs bg-white border border-zinc-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-colors font-mono"
+              className="w-full px-3 py-1.5 text-xs bg-white border border-zinc-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-colors font-mono"
             />
           </div>
         </div>
@@ -278,7 +278,7 @@ export function PublishPanel({
             publishing
               ? "bg-zinc-200 text-zinc-500 cursor-not-allowed"
               : readiness.publishing_ready
-              ? "bg-blue-600 hover:bg-blue-700 text-white active:scale-[0.99]"
+              ? "bg-orange-600 hover:bg-orange-700 text-white active:scale-[0.99]"
               : "bg-zinc-100 text-zinc-400 cursor-not-allowed"
           }`}
         >

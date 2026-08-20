@@ -11,7 +11,7 @@ BIGQUERY_PROJECT_ID=your-project-id
 BIGQUERY_LOCATION=EU
 BIGQUERY_ALLOWED_DATASETS=your-project-id.your_dataset
 BIGQUERY_MAX_BYTES_BILLED=1000000000
-BIGQUERY_MAX_ROWS=1000
+BIGQUERY_MAX_ROWS=10000
 
 BIGQUERY_POWERBI_IMPLEMENTATION=2.0
 BIGQUERY_POWERBI_USE_STORAGE_API=false
@@ -67,3 +67,31 @@ For a local report:
 
 Microsoft connector reference:
 https://learn.microsoft.com/power-query/connectors/google-bigquery
+
+## Cloud (Fabric) data modes
+
+`bigquery_create_powerbi_semantic_model` accepts a `storage_mode` when the model
+is bound for cloud publication via `create_powerbi_cloud_semantic_model`:
+
+- `directQuery` (default): the cloud model points at the BigQuery table through
+  the native Google BigQuery connector. The report always reads live data, but
+  the Power BI service must be able to reach BigQuery and hold Google OAuth
+  credentials. The Google OAuth consent is a one-time manual step in the Power BI
+  service performed by a human with the Google account; the agent cannot perform
+  that interactive login with its service-principal credentials. Live queries
+  also incur per-query GCP cost, add render latency (the ExportToFile render can
+  exceed `POWERBI_CLOUD_TIMEOUT_SECONDS`), and each query is capped at 1M rows.
+
+- `embedded`: the agent snapshots up to `BIGQUERY_MAX_ROWS` rows into a
+  data-source-free calculated table. The cloud model needs no gateway, no Google
+  credentials, and no refresh schedule; it is the only mode that is fully
+  automated from environment credentials to rendered pages. The trade-off is that
+  the data is a point-in-time snapshot: it reflects the BigQuery table when the
+  semantic model was built or updated. To refresh the snapshot, rebuild the
+  semantic model (this triggers an on-demand refresh) and re-render the report.
+
+For cloud publication the embedded snapshot is recommended. It is deterministic,
+has no external runtime dependency, and renders reliably through ExportToFile.
+Live data in the cloud requires the one-time connector authorization described
+above and is best reserved for cases where freshness on every interaction
+matters more than automation and cost.

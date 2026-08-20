@@ -82,6 +82,7 @@ export function PagesPanel({ dashboardId, projectPath }: PagesPanelProps) {
         <h3 className="text-sm font-semibold text-zinc-900 flex items-center gap-2">
           <Layers className="w-4 h-4 text-orange-500" />
           Report Pages
+          <span className="text-[10px] font-normal text-zinc-400">· cloud snapshot</span>
         </h3>
         <div className="flex items-center gap-2">
           {batch && (
@@ -119,6 +120,11 @@ export function PagesPanel({ dashboardId, projectPath }: PagesPanelProps) {
 
         {!loading && pages.length > 0 && (
           <div className="space-y-6">
+            <p className="text-[11px] text-zinc-400 leading-relaxed">
+              Cloud pages render from an embedded data snapshot taken when the
+              semantic model was built or refreshed. To refresh the snapshot,
+              rebuild the semantic model, then click Render Pages.
+            </p>
             {pages.map((page) => (
               <div key={page.path} className="border border-zinc-200 rounded-lg overflow-hidden bg-zinc-50">
                 <div className="px-3 py-2 bg-white border-b border-zinc-200 flex items-center justify-between">

@@ -269,6 +269,55 @@ async def render_dashboard(report_id: str, page_names: list[str] | None = None, 
     )
     return result.to_dict()
 
+@app.get("/api/dashboard/pages")
+async def list_dashboard_pages(report_id: str = "", project_path: str = ""):
+    """List the latest rendered page images for a report, with page names when available."""
+    root = Path(ROOT_DIR)
+    preview_root = root / ".pbir-previews" / report_id
+    if not preview_root.is_dir():
+        return {"success": False, "error": "no renders found for this report", "pages": []}
+
+    batches = sorted(
+        (d for d in preview_root.iterdir() if d.is_dir()),
+        key=lambda d: d.stat().st_mtime,
+        reverse=True,
+    )
+    if not batches:
+        return {"success": False, "error": "no renders found for this report", "pages": []}
+
+    latest = batches[0]
+    artifacts = sorted(latest.glob("*.png"))
+    if not artifacts:
+        return {"success": False, "error": "no rendered pages in latest batch", "pages": []}
+
+    names: list[str] = []
+    if project_path:
+        try:
+            from backend.custom_mcp_server import _allowed_authoring_path
+            from backend.report_authoring.preview import build_preview_manifest
+
+            manifest = build_preview_manifest(_allowed_authoring_path(project_path))
+            names = [
+                (p.get("display_name") or p.get("id") or f"Page {i + 1}")
+                for i, p in enumerate(manifest.get("pages", []))
+            ]
+        except Exception:
+            names = []
+
+    pages = []
+    for idx, artifact in enumerate(artifacts):
+        pages.append({
+            "index": idx,
+            "name": names[idx] if idx < len(names) else f"Page {idx + 1}",
+            "path": str(artifact.relative_to(root)),
+        })
+    return {
+        "success": True,
+        "report_id": report_id,
+        "batch": latest.name,
+        "pages": pages,
+    }
+
 @app.post("/api/dashboard/review")
 async def review_render(artifact_paths: list[str], project_path: str, provider: str = "", model: str = ""):
     """Review rendered Power BI screenshots."""

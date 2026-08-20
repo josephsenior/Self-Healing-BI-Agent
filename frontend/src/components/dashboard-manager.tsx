@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { BarChart3, RotateCcw, Palette, ShieldCheck, Cloud, Monitor, Database, Settings, ChevronDown, ChevronUp, Sparkles } from "lucide-react";
+import { BarChart3, RotateCcw, Palette, ShieldCheck, Cloud, Monitor, Database, Settings, ChevronDown, ChevronUp, Sparkles, Layers } from "lucide-react";
 import type { DashboardSpec, DashboardState, DashboardVersion, VisualSpec } from "@/types";
 import { DashboardVersionTimeline } from "./dashboard-version-timeline";
 import { VisualQAPanel } from "./visual-qa-panel";
@@ -9,6 +9,7 @@ import { ColorThemePicker } from "./color-theme-picker";
 import { PublishPanel } from "./publish-panel";
 import { DesktopLauncher } from "./desktop-launcher";
 import { QualificationRunner } from "./qualification-runner";
+import { PagesPanel } from "./pages-panel";
 
 interface DashboardManagerProps {
   dashboardId: string;
@@ -21,7 +22,7 @@ export function DashboardManager({ dashboardId, projectPath, initialSpec, initia
   const [spec, setSpec] = useState<DashboardSpec | null>(initialSpec || null);
   const [state, setState] = useState<DashboardState | null>(initialState || null);
   const [versions, setVersions] = useState<DashboardVersion[]>([]);
-  const [activeTab, setActiveTab] = useState<"overview" | "qa" | "colors" | "publish" | "desktop" | "qualification">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "qa" | "colors" | "publish" | "desktop" | "qualification" | "pages">("overview");
   const [loading, setLoading] = useState(true);
 
   const fetchDashboard = async () => {
@@ -93,6 +94,7 @@ export function DashboardManager({ dashboardId, projectPath, initialSpec, initia
     { id: "colors", label: "Colors", icon: Palette, count: visuals.length },
     { id: "publish", label: "Publish", icon: Cloud, count: visuals.length },
     { id: "desktop", label: "Desktop", icon: Monitor, count: visuals.length },
+    { id: "pages", label: "Pages", icon: Layers, count: visuals.length },
     { id: "qualification", label: "Qualification", icon: Sparkles, count: visuals.length },
   ] as const;
 
@@ -227,6 +229,13 @@ export function DashboardManager({ dashboardId, projectPath, initialSpec, initia
 
         {activeTab === "desktop" && (
           <DesktopLauncher
+            dashboardId={dashboardId}
+            projectPath={projectPath}
+          />
+        )}
+
+        {activeTab === "pages" && (
+          <PagesPanel
             dashboardId={dashboardId}
             projectPath={projectPath}
           />

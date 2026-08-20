@@ -250,7 +250,7 @@ export default function Home() {
     }
   }, [messages]);
 
-  const isRunning = agentStatus === "running" || agentStatus === "starting_agent" || agentStatus === "mcp_connected";
+  const isRunning = agentStatus === "running" || agentStatus === "starting_agent";
   const inputDisabled = connectionStatus !== "connected";
   const dashboardState = latestDashboardState(messages);
 

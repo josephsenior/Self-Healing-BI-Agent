@@ -203,6 +203,34 @@ function renderInline(text: string): React.ReactNode {
   });
 }
 
+function ImageBlock({ alt, src }: { alt: string; src: string }) {
+  const [error, setError] = useState(false);
+
+  if (error) {
+    return (
+      <div className="my-3 p-4 rounded-xl border border-zinc-200 bg-zinc-50 text-zinc-500 text-xs text-center">
+        <span className="text-zinc-400">Failed to load image: {src}</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="my-3 rounded-xl overflow-hidden border border-zinc-200 bg-white">
+      <img
+        src={src}
+        alt={alt}
+        className="w-full h-auto"
+        onError={() => setError(true)}
+      />
+      {alt && (
+        <div className="px-3 py-2 border-t border-zinc-100 bg-zinc-50/60">
+          <p className="text-[11px] text-zinc-500 text-center">{alt}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TextPart({ text }: { text: string }) {
   if (!text.trim()) return null;
 
@@ -237,6 +265,15 @@ function TextPart({ text }: { text: string }) {
 
   lines.forEach((line, idx) => {
     const key = `line-${idx}`;
+
+    // Markdown image: ![alt](url)
+    const imgMatch = line.match(/^!\[([^\]]*)\]\(([^)]+)\)/);
+    if (imgMatch) {
+      flushUl(key + "ul");
+      flushOl(key + "ol");
+      elements.push(<ImageBlock key={key} alt={imgMatch[1]} src={imgMatch[2]} />);
+      return;
+    }
 
     // Headings
     const h3 = line.match(/^###\s+(.*)/);

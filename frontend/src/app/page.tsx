@@ -5,7 +5,8 @@ import {
   Terminal, MessageSquare, RefreshCw, Menu, Database, Sparkles, BarChart3, AlertTriangle,
   Download, Cloud, Monitor, Palette, ShieldCheck, X, ChevronDown, ChevronUp, ChevronLeft, ChevronRight,
   Settings, Send, Mic, Paperclip, MoreHorizontal, Sun, Moon, HelpCircle, User, LogOut,
-  Bell, Search, Filter, Grid, List, ArrowRight, ArrowLeft, Maximize, Minimize, Gem
+  Bell, Search, Filter, Grid, List, ArrowRight, ArrowLeft, Maximize, Minimize, Gem,
+  PanelLeftOpen, PanelLeftClose
 } from "lucide-react";
 import { useAgent } from "@/hooks/use-agent";
 import { Sidebar } from "@/components/sidebar";
@@ -283,18 +284,20 @@ export default function Home() {
         onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
       />
 
-      {/* Mobile Sidebar Overlay */}
-      {mobileSidebarOpen && (
-        <button
-          onClick={() => setMobileSidebarOpen(false)}
-          className="fixed inset-0 z-30 bg-zinc-950/20 lg:hidden"
-          aria-label="Close sidebar"
-        />
-      )}
-
       {/* Header */}
       <header className="workspace-header">
         <div className="header-left flex items-center gap-3">
+          {sidebarCollapsed && (
+            <button
+              type="button"
+              onClick={() => setSidebarCollapsed(false)}
+              className="hidden lg:flex items-center justify-center w-8 h-8 rounded-lg text-zinc-500 hover:text-zinc-800 hover:bg-zinc-100 transition-colors"
+              title="Expand sidebar"
+              aria-label="Expand sidebar"
+            >
+              <PanelLeftOpen className="w-4 h-4" />
+            </button>
+          )}
           <button
             onClick={() => setMobileSidebarOpen(true)}
             className="lg:hidden p-2 rounded-lg text-zinc-500 hover:bg-zinc-100"

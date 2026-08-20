@@ -1,7 +1,26 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { Cloud, ShieldCheck, AlertCircle, XCircle, RotateCcw, CheckCircle, WifiOff, Key, Monitor, ArrowUpRight } from "lucide-react";
+import {
+  Cloud,
+  ShieldCheck,
+  AlertCircle,
+  XCircle,
+  RotateCcw,
+  CheckCircle,
+  WifiOff,
+  Key,
+  Monitor,
+  ArrowUpRight,
+  ExternalLink,
+  Copy,
+  Check,
+  Building2,
+  Database,
+  Lock,
+  Layers,
+  Sparkles,
+} from "lucide-react";
 import type { CloudReadiness } from "@/types";
 
 interface PublishPanelProps {
@@ -11,11 +30,23 @@ interface PublishPanelProps {
   onPublished: (result: any) => void;
 }
 
-export function PublishPanel({ dashboardId, projectPath, displayName, onPublished }: PublishPanelProps) {
+export function PublishPanel({
+  dashboardId,
+  projectPath,
+  displayName,
+  onPublished,
+}: PublishPanelProps) {
   const [readiness, setReadiness] = useState<CloudReadiness | null>(null);
   const [publishing, setPublishing] = useState(false);
   const [result, setResult] = useState<any>(null);
+  const [copied, setCopied] = useState(false);
+  const [semanticModelId, setSemanticModelId] = useState("");
+  const [customReportName, setCustomReportName] = useState(displayName || "");
   const [expandedChecks, setExpandedChecks] = useState(false);
+
+  useEffect(() => {
+    setCustomReportName(displayName || "");
+  }, [displayName]);
 
   const checkReadiness = async () => {
     try {
@@ -40,7 +71,11 @@ export function PublishPanel({ dashboardId, projectPath, displayName, onPublishe
       const res = await fetch("/api/dashboard/publish", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ project_path: projectPath, display_name: displayName }),
+        body: JSON.stringify({
+          project_path: projectPath,
+          display_name: customReportName.trim() || displayName,
+          semantic_model_id: semanticModelId.trim() || undefined,
+        }),
       });
       const data = await res.json();
       setResult(data);
@@ -54,167 +89,271 @@ export function PublishPanel({ dashboardId, projectPath, displayName, onPublishe
     }
   };
 
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
   const getCheckIcon = (key: string, value: boolean) => {
     if (key === "vision_provider" || key === "license_mode") return null;
-    return value ? <CheckCircle className="w-4 h-4 text-emerald-500" /> : <XCircle className="w-4 h-4 text-red-500" />;
+    return value ? (
+      <CheckCircle className="w-4 h-4 text-emerald-500 shrink-0" />
+    ) : (
+      <XCircle className="w-4 h-4 text-rose-500 shrink-0" />
+    );
   };
 
   const getCheckLabel = (key: string) => {
     const labels: Record<string, string> = {
-      workspace_id: "Workspace ID configured",
-      fabric_auth: "Fabric authentication",
-      powerbi_auth: "Power BI authentication",
-      vision_provider: "Vision provider",
-      vision_model: "Vision model configured",
-      vision_api_key: "Vision API key",
+      workspace_id: "Fabric / Power BI Workspace ID",
+      fabric_auth: "Microsoft Fabric Auth (Bearer Token / Entra ID)",
+      powerbi_auth: "Power BI REST API Auth",
+      vision_provider: "AI Visual Inspection Provider",
+      vision_model: "Visual QA Model Configured",
+      vision_api_key: "Vision API Key",
     };
     return labels[key] || key;
   };
 
-  if (!readiness) return <div className="text-center py-4 text-sm text-zinc-500">Checking cloud readiness...</div>;
+  if (!readiness) {
+    return (
+      <div className="flex flex-col items-center justify-center py-12 text-center">
+        <RotateCcw className="w-6 h-6 text-blue-500 animate-spin mb-2" />
+        <p className="text-xs text-zinc-500 font-medium">Checking Microsoft Fabric cloud readiness…</p>
+      </div>
+    );
+  }
+
+  const webUrl =
+    result?.web_url ||
+    (result?.workspace_id && result?.report_id
+      ? `https://app.powerbi.com/groups/${result.workspace_id}/reports/${result.report_id}`
+      : null);
 
   return (
-    <div className="bg-white rounded-lg border border-zinc-200 overflow-hidden">
-      <div className="px-4 py-3 border-b border-zinc-200 bg-zinc-50 flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-zinc-900 flex items-center gap-2">
-          <Cloud className="w-4 h-4 text-orange-500" />
-          Publish to Fabric
-        </h3>
-        <button onClick={checkReadiness} className="p-1 text-zinc-400 hover:text-zinc-600" title="Refresh">
-          <RotateCcw className="w-4 h-4" />
+    <div className="bg-white rounded-xl border border-zinc-200 shadow-xs overflow-hidden">
+      {/* Header */}
+      <div className="px-4 py-3 border-b border-zinc-100 bg-zinc-50/70 flex items-center justify-between">
+        <div className="flex items-center gap-2.5">
+          <div className="w-7 h-7 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center border border-blue-100">
+            <Cloud className="w-4 h-4" />
+          </div>
+          <div>
+            <h3 className="text-xs font-semibold text-zinc-900 leading-none">Microsoft Fabric Publishing</h3>
+            <p className="text-[11px] text-zinc-400 mt-0.5 leading-none">Deploy PBIR report directly to Fabric workspace</p>
+          </div>
+        </div>
+        <button
+          onClick={checkReadiness}
+          className="p-1.5 text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100 rounded-md transition-colors"
+          title="Refresh readiness status"
+        >
+          <RotateCcw className="w-3.5 h-3.5" />
         </button>
       </div>
 
       <div className="p-4 space-y-4">
-        {/* Overall Status */}
-        <div className={`p-4 rounded-lg border ${readiness.publishing_ready ? "bg-emerald-50 border-emerald-200" : "bg-red-50 border-red-200"}`}>
-          <div className="flex items-center gap-3">
+        {/* Readiness Status Card */}
+        <div
+          className={`p-3.5 rounded-xl border transition-all ${
+            readiness.publishing_ready
+              ? "bg-emerald-50/60 border-emerald-200/80 text-emerald-900"
+              : "bg-amber-50/60 border-amber-200/80 text-amber-900"
+          }`}
+        >
+          <div className="flex items-start gap-3">
             {readiness.publishing_ready ? (
-              <CheckCircle className="w-6 h-6 text-emerald-500" />
+              <CheckCircle className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
             ) : (
-              <XCircle className="w-6 h-6 text-red-500" />
+              <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
             )}
-            <div>
-              <p className="font-medium text-zinc-800">
-                {readiness.publishing_ready ? "Ready to Publish" : "Publishing Not Ready"}
-              </p>
-              <p className="text-sm text-zinc-600 mt-0.5">
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <p className="text-xs font-semibold">
+                  {readiness.publishing_ready
+                    ? "Fabric Workspace Ready"
+                    : "Fabric Configuration Incomplete"}
+                </p>
+                <span
+                  className={`px-1.5 py-0.2 text-[10px] font-mono rounded font-medium ${
+                    readiness.license_mode === "capacity"
+                      ? "bg-emerald-100 text-emerald-800"
+                      : "bg-amber-100 text-amber-800"
+                  }`}
+                >
+                  {readiness.license_mode.toUpperCase()}
+                </span>
+              </div>
+              <p className="text-xs text-zinc-600 mt-1 leading-relaxed">
                 {readiness.publishing_ready
-                  ? "All required credentials and workspace are configured."
-                  : "Missing required configuration. Expand checks below for details."}
+                  ? "Connected to Fabric workspace. Ready to deploy the live PBIR definition."
+                  : "Missing Fabric API access token or workspace credentials. Configure them below or via .env."}
               </p>
             </div>
           </div>
-          <div className="mt-3 flex items-center gap-2 text-sm">
-            <span className={`px-2 py-0.5 rounded font-mono ${readiness.license_mode === "capacity" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
-              {readiness.license_mode.toUpperCase()}
-            </span>
-            <span className="text-zinc-500">License Mode</span>
-            {!readiness.rendering_supported && (
-              <span className="flex items-center gap-1 text-amber-600 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
-                <WifiOff className="w-3 h-3" />
-                No PNG Rendering (ExportToFile unsupported)
-              </span>
-            )}
+        </div>
+
+        {/* Deployment Inputs */}
+        <div className="space-y-3 p-3.5 rounded-xl bg-zinc-50/60 border border-zinc-200/70">
+          <div className="space-y-1">
+            <label className="text-[11px] font-semibold text-zinc-700">Report Display Name</label>
+            <input
+              type="text"
+              value={customReportName}
+              onChange={(e) => setCustomReportName(e.target.value)}
+              placeholder="e.g. Executive Sales Performance"
+              className="w-full px-3 py-1.5 text-xs bg-white border border-zinc-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-colors"
+            />
+          </div>
+
+          <div className="space-y-1">
+            <div className="flex items-center justify-between">
+              <label className="text-[11px] font-semibold text-zinc-700">Fabric Semantic Model ID (Optional)</label>
+              <span className="text-[10px] text-zinc-400">Direct Lake / Import</span>
+            </div>
+            <input
+              type="text"
+              value={semanticModelId}
+              onChange={(e) => setSemanticModelId(e.target.value)}
+              placeholder="UUID of target Fabric semantic model (if re-binding)"
+              className="w-full px-3 py-1.5 text-xs bg-white border border-zinc-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-colors font-mono"
+            />
           </div>
         </div>
 
-        {/* Checks */}
-        <details className="group" open={expandedChecks} onToggle={() => setExpandedChecks(!expandedChecks)}>
-          <summary className="flex items-center justify-between cursor-pointer p-2 rounded hover:bg-zinc-50">
-            <span className="text-sm font-medium text-zinc-700">Configuration Checks</span>
-            <span className="text-zinc-400 transition-transform group-open:rotate-180">▼</span>
-          </summary>
-          <div className="px-2 pb-2 space-y-2 border-t border-zinc-100 mt-2">
-            {Object.entries(readiness.checks).map(([key, value]) => {
+        {/* Configuration Checks Accordion */}
+        <div className="border border-zinc-200/80 rounded-xl overflow-hidden">
+          <button
+            type="button"
+            onClick={() => setExpandedChecks(!expandedChecks)}
+            className="w-full flex items-center justify-between p-3 text-left bg-zinc-50/50 hover:bg-zinc-100/60 transition-colors"
+          >
+            <span className="text-xs font-semibold text-zinc-700 flex items-center gap-2">
+              <Building2 className="w-3.5 h-3.5 text-zinc-500" />
+              <span>Environment & Credential Checks</span>
+            </span>
+            <span className="text-xs text-zinc-400 font-mono">
+              {Object.values(readiness.checks).filter(Boolean).length} / {Object.keys(readiness.checks).length}
+            </span>
+          </button>
+
+          {expandedChecks && (
+            <div className="p-3 border-t border-zinc-100 space-y-2 bg-white">
+              {Object.entries(readiness.checks).map(([key, value]) => {
                 const val = value as unknown;
                 return (
-                  <div key={key} className="flex items-center justify-between p-2 rounded bg-zinc-50">
-                    <div className="flex items-center gap-2">
+                  <div key={key} className="flex items-center justify-between p-2 rounded-lg bg-zinc-50 border border-zinc-100">
+                    <div className="flex items-center gap-2.5 min-w-0">
                       {getCheckIcon(key, value as boolean)}
-                      <div>
-                        <p className="text-sm font-medium text-zinc-800">{getCheckLabel(key)}</p>
+                      <div className="min-w-0">
+                        <p className="text-xs font-medium text-zinc-800 truncate">{getCheckLabel(key)}</p>
                         {key === "vision_provider" && typeof val === "string" && (
-                          <p className="text-[10px] text-zinc-500 capitalize">{val.toUpperCase()}</p>
-                        )}
-                        {key === "license_mode" && typeof val === "string" && (
-                          <p className="text-[10px] text-zinc-500 capitalize">{val}</p>
+                          <p className="text-[10px] text-zinc-500 uppercase">{val}</p>
                         )}
                       </div>
                     </div>
                     {typeof val === "boolean" && (
-                      <span className={`${(val as boolean) ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"} text-[10px] font-mono px-2 py-0.5 rounded`}>
-                        {(val as boolean) ? "OK" : "MISSING"}
+                      <span
+                        className={`text-[10px] font-mono font-semibold px-2 py-0.5 rounded ${
+                          val ? "bg-emerald-100 text-emerald-800" : "bg-rose-100 text-rose-800"
+                        }`}
+                      >
+                        {val ? "READY" : "MISSING"}
                       </span>
                     )}
                   </div>
                 );
               })}
-          </div>
-        </details>
+            </div>
+          )}
+        </div>
 
-        {/* Limitations */}
-        {readiness.limitations.length > 0 && (
-          <div className="p-3 rounded-lg bg-amber-50 border border-amber-200">
-            <p className="text-sm font-medium text-amber-800 mb-1">Limitations</p>
-            <ul className="text-sm text-amber-700 space-y-1">
-              {readiness.limitations.map((l, i) => (
-                <li key={i} className="flex items-start gap-2">
-                  <AlertCircle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
-                  {l}
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-
-        {/* Publish Button */}
+        {/* Publish Action Button */}
         <button
+          type="button"
           onClick={handlePublish}
           disabled={publishing || !readiness.publishing_ready}
-          className={`w-full flex items-center justify-center gap-2 px-4 py-3 rounded-lg font-medium transition-colors ${
+          className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-xs font-semibold shadow-xs transition-all ${
             publishing
-              ? "bg-zinc-300 text-zinc-500 cursor-not-allowed"
+              ? "bg-zinc-200 text-zinc-500 cursor-not-allowed"
               : readiness.publishing_ready
-              ? "bg-orange-500 text-white hover:bg-orange-600"
+              ? "bg-blue-600 hover:bg-blue-700 text-white active:scale-[0.99]"
               : "bg-zinc-100 text-zinc-400 cursor-not-allowed"
           }`}
         >
           {publishing ? (
             <>
-              <RotateCcw className="w-4 h-4 animate-spin" />
-              Publishing...
+              <RotateCcw className="w-3.5 h-3.5 animate-spin" />
+              <span>Deploying to Microsoft Fabric…</span>
             </>
           ) : (
             <>
-              <ArrowUpRight className="w-4 h-4" />
-              Publish to Fabric
+              <Cloud className="w-3.5 h-3.5" />
+              <span>Publish to Microsoft Fabric</span>
             </>
           )}
         </button>
 
-        {/* Result */}
+        {/* Publish Result Card */}
         {result && (
-          <div className={`p-3 rounded-lg border ${result.error ? "bg-red-50 border-red-200" : "bg-emerald-50 border-emerald-200"}`}>
-            <div className="flex items-center gap-2">
+          <div
+            className={`p-4 rounded-xl border animate-fade-in ${
+              result.error
+                ? "bg-rose-50/80 border-rose-200 text-rose-900"
+                : "bg-emerald-50/80 border-emerald-200 text-emerald-900"
+            }`}
+          >
+            <div className="flex items-center gap-2 mb-2">
               {result.error ? (
-                <XCircle className="w-4 h-4 text-red-500" />
+                <XCircle className="w-4 h-4 text-rose-600 shrink-0" />
               ) : (
-                <CheckCircle className="w-4 h-4 text-emerald-500" />
+                <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
               )}
-              <span className="font-medium text-sm">
-                {result.error ? "Publish Failed" : "Published Successfully"}
-              </span>
+              <p className="text-xs font-semibold">
+                {result.error ? "Deployment Failed" : "Successfully Published to Fabric"}
+              </p>
             </div>
-            {result.error && <p className="text-sm text-red-700 mt-1">{result.error}</p>}
-            {!result.error && (
-              <div className="mt-2 space-y-1 text-sm">
-                <p className="text-zinc-700"><strong>Report ID:</strong> {result.report_id || result.id}</p>
-                {result.web_url && (
-                  <a href={result.web_url} target="_blank" rel="noopener noreferrer" className="text-orange-600 hover:underline flex items-center gap-1">
-                    <Monitor className="w-3.5 h-3.5" />
-                    Open in Power BI Service
-                  </a>
+
+            {result.error ? (
+              <p className="text-xs text-rose-700 leading-relaxed font-mono bg-white/60 p-2.5 rounded-lg border border-rose-100">
+                {result.error}
+              </p>
+            ) : (
+              <div className="space-y-3">
+                <div className="p-2.5 bg-white/80 rounded-lg border border-emerald-100 space-y-1.5 text-xs text-zinc-700">
+                  <div className="flex items-center justify-between">
+                    <span className="text-zinc-500">Report ID:</span>
+                    <span className="font-mono font-medium text-zinc-900">{result.report_id || result.id}</span>
+                  </div>
+                  {result.workspace_id && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-zinc-500">Workspace ID:</span>
+                      <span className="font-mono text-zinc-800">{result.workspace_id}</span>
+                    </div>
+                  )}
+                </div>
+
+                {webUrl && (
+                  <div className="flex items-center gap-2">
+                    <a
+                      href={webUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-xs transition-colors"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" />
+                      <span>Open in Power BI Service</span>
+                    </a>
+                    <button
+                      type="button"
+                      onClick={() => copyToClipboard(webUrl)}
+                      className="p-2 rounded-lg bg-white border border-emerald-200 text-zinc-600 hover:text-zinc-900 hover:bg-emerald-50 transition-colors shrink-0"
+                      title="Copy URL"
+                    >
+                      {copied ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
                 )}
               </div>
             )}

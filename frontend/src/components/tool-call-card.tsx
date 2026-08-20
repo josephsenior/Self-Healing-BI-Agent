@@ -728,8 +728,11 @@ export function ToolCallCard({ toolCall, apiBase }: ToolCallCardProps) {
   const theme = getTheme(toolCall.name);
   const action = getActionSummary(toolCall, data);
   const isRunning = toolCall.status === "running" || (toolCall.status === undefined && toolCall.result === undefined && !toolCall.error);
+  const isDone = toolCall.status === "complete" || (toolCall.result !== undefined && !toolCall.error);
+  const isFailed = toolCall.status === "failed" || !!toolCall.error;
   const startedAtRef = useRef<number | null>(null);
   const [elapsedMs, setElapsedMs] = useState(0);
+
   useEffect(() => {
     if (isRunning && startedAtRef.current === null) startedAtRef.current = Date.now();
     if (!isRunning) return;
@@ -738,27 +741,137 @@ export function ToolCallCard({ toolCall, apiBase }: ToolCallCardProps) {
     const id = window.setInterval(tick, 500);
     return () => window.clearInterval(id);
   }, [isRunning]);
+
   const durationMs = startedAtRef.current === null ? undefined : isRunning ? elapsedMs : Date.now() - startedAtRef.current;
 
-  return (
-    <article aria-live={isRunning ? "polite" : undefined} className={`relative overflow-hidden rounded-2xl border bg-white shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_24px_rgba(0,0,0,0.035)] ${toolCall.error ? "border-red-200" : theme.borderClass}`}>
-      <div className="absolute inset-y-0 left-0 w-1" style={{ backgroundColor: toolCall.error ? "#dc2626" : theme.accent }} />
-      <header className="flex items-center gap-3 px-4 py-3">
-        <span className={`grid size-9 shrink-0 place-items-center rounded-xl border ${theme.softClass} ${theme.iconClass} ${theme.borderClass}`}>{theme.icon}</span>
-        <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-1.5"><p className="truncate text-xs font-bold text-zinc-900">{theme.label}</p><Status toolCall={toolCall} durationMs={durationMs} /></div><p className="mt-0.5 truncate text-[10px] text-zinc-500">{action}</p></div>
-        <button onClick={() => setExpanded((value) => !value)} className="grid size-7 shrink-0 place-items-center rounded-lg text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700" aria-expanded={expanded} aria-label="Show technical details"><ChevronDown className={`size-3.5 transition-transform ${expanded ? "rotate-180" : ""}`} /></button>
-      </header>
+  const borderColor = isFailed ? "#fca5a5" : isRunning ? "#fdba74" : isDone ? "#bbf7d0" : theme.borderClass.replace("border-", "");
+  const accentColor = isFailed ? "#dc2626" : theme.accent;
 
-      {isRunning && <div className="px-4 pb-3"><div className={`relative h-1 overflow-hidden rounded-full ${theme.softClass}`}><span className="absolute inset-y-0 w-1/3 animate-[tool-progress_1.4s_ease-in-out_infinite] rounded-full" style={{ backgroundColor: theme.accent }} /></div></div>}
-      {toolCall.error && <div className="px-4 pb-3"><div className="flex gap-2.5 rounded-xl border border-red-200 bg-red-50 p-3"><AlertCircle className="mt-0.5 size-4 shrink-0 text-red-600" /><div className="min-w-0"><p className="text-[10px] font-bold uppercase tracking-wider text-red-700">Tool failed</p><p className="mt-1 text-[11px] leading-relaxed text-red-800">The agent can use this error to correct the request and retry. Technical detail:</p><pre className="mt-1 max-h-28 overflow-auto whitespace-pre-wrap font-mono text-[10px] leading-relaxed text-red-800">{toolCall.error}</pre></div></div></div>}
-      {(toolCall.status === "complete" || toolCall.result !== undefined) && !toolCall.error && (
-        <div className="px-4 pb-4 space-y-3">
-          <ToolBody toolCall={toolCall} data={data} theme={theme} apiBase={apiBase} />
-          {toolCall.images && toolCall.images.length > 0 && theme.kind !== "review" && theme.kind !== "workspace" && <ImageGallery images={toolCall.images} apiBase={apiBase} />}
+  return (
+    <article
+      aria-live={isRunning ? "polite" : undefined}
+      className={`group relative overflow-hidden rounded-2xl border bg-white transition-shadow hover:shadow-md ${
+        isFailed ? "border-red-200 shadow-[0_1px_3px_rgba(220,38,38,0.08)]" :
+        isRunning ? "border-orange-200 shadow-[0_1px_3px_rgba(249,115,22,0.10)]" :
+        isDone ? "border-zinc-200 shadow-[0_1px_2px_rgba(0,0,0,0.05)]" :
+        `${theme.borderClass} shadow-[0_1px_2px_rgba(0,0,0,0.04)]`
+      }`}
+    >
+      {/* Left accent strip */}
+      <div
+        className="absolute inset-y-0 left-0 w-[3px] rounded-l-2xl"
+        style={{ backgroundColor: accentColor }}
+      />
+
+      {/* Running shimmer glow on top */}
+      {isRunning && (
+        <div className="absolute inset-x-0 top-0 h-[2px] overflow-hidden">
+          <div
+            className="h-full w-1/2 animate-[tool-progress_1.4s_ease-in-out_infinite] rounded-full"
+            style={{ backgroundColor: theme.accent }}
+          />
         </div>
       )}
 
-      {expanded && <div className="border-t border-zinc-100 bg-zinc-50/80 px-4 py-3"><div className="mb-2 flex items-center justify-between"><p className="text-[9px] font-bold uppercase tracking-[0.16em] text-zinc-400">Technical details</p><span className="font-mono text-[9px] text-zinc-400">{toolCall.name}</span></div><pre className="max-h-60 overflow-auto whitespace-pre-wrap rounded-lg border border-zinc-200 bg-white p-3 font-mono text-[10px] leading-relaxed text-zinc-600">{JSON.stringify(toolCall.arguments, null, 2)}</pre></div>}
+      {/* Header */}
+      <header className="flex items-center gap-3 px-4 py-3 pl-5">
+        {/* Icon */}
+        <span
+          className={`relative grid size-9 shrink-0 place-items-center rounded-xl border ${theme.softClass} ${theme.iconClass} ${theme.borderClass} transition-transform group-hover:scale-105`}
+        >
+          {theme.icon}
+          {isRunning && (
+            <span
+              className="absolute -right-0.5 -top-0.5 size-2.5 rounded-full border-2 border-white animate-pulse"
+              style={{ backgroundColor: theme.accent }}
+            />
+          )}
+          {isDone && (
+            <span className="absolute -right-0.5 -top-0.5 grid size-2.5 place-items-center rounded-full border-2 border-white bg-emerald-500">
+              <Check className="size-1.5 text-white" />
+            </span>
+          )}
+          {isFailed && (
+            <span className="absolute -right-0.5 -top-0.5 size-2.5 rounded-full border-2 border-white bg-red-500" />
+          )}
+        </span>
+
+        {/* Label + summary */}
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <p className="truncate text-[11px] font-bold uppercase tracking-wide text-zinc-800">{theme.label}</p>
+            <Status toolCall={toolCall} durationMs={durationMs} />
+          </div>
+          <p className="mt-0.5 truncate text-[11px] font-medium text-zinc-500">{action}</p>
+        </div>
+
+        {/* Expand toggle */}
+        <button
+          onClick={() => setExpanded((v) => !v)}
+          className="grid size-7 shrink-0 place-items-center rounded-lg text-zinc-400 transition-colors hover:bg-orange-50 hover:text-orange-600"
+          aria-expanded={expanded}
+          aria-label="Show technical details"
+        >
+          <ChevronDown className={`size-3.5 transition-transform duration-200 ${expanded ? "rotate-180" : ""}`} />
+        </button>
+      </header>
+
+      {/* Running progress bar */}
+      {isRunning && (
+        <div className="px-5 pb-3">
+          <div className="relative h-1 overflow-hidden rounded-full bg-orange-100">
+            <span
+              className="absolute inset-y-0 w-1/3 animate-[tool-progress_1.4s_ease-in-out_infinite] rounded-full opacity-90"
+              style={{ backgroundColor: theme.accent }}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Error state */}
+      {toolCall.error && (
+        <div className="px-5 pb-4">
+          <div className="flex gap-2.5 rounded-xl border border-red-200 bg-red-50 p-3">
+            <AlertCircle className="mt-0.5 size-4 shrink-0 text-red-600" />
+            <div className="min-w-0">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-red-700">Tool failed</p>
+              <p className="mt-1 text-[11px] leading-relaxed text-red-800">
+                The agent can use this error to correct the request and retry.
+              </p>
+              <pre className="mt-1 max-h-28 overflow-auto whitespace-pre-wrap font-mono text-[10px] leading-relaxed text-red-800">
+                {toolCall.error}
+              </pre>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Result body */}
+      {isDone && !toolCall.error && (
+        <div className="px-5 pb-4 space-y-3">
+          {/* Subtle divider */}
+          <div className="h-px bg-gradient-to-r from-transparent via-zinc-200 to-transparent" />
+          <ToolBody toolCall={toolCall} data={data} theme={theme} apiBase={apiBase} />
+          {toolCall.images && toolCall.images.length > 0 && theme.kind !== "review" && theme.kind !== "workspace" && (
+            <ImageGallery images={toolCall.images} apiBase={apiBase} />
+          )}
+        </div>
+      )}
+
+      {/* Expanded technical details */}
+      {expanded && (
+        <div className="border-t border-zinc-100 bg-zinc-50/60 px-5 py-3">
+          <div className="mb-2 flex items-center justify-between">
+            <p className="text-[9px] font-bold uppercase tracking-[0.16em] text-zinc-400">Technical details</p>
+            <span className="rounded-md bg-orange-50 px-1.5 py-0.5 font-mono text-[9px] font-semibold text-orange-700 ring-1 ring-orange-100">
+              {toolCall.name}
+            </span>
+          </div>
+          <pre className="max-h-60 overflow-auto whitespace-pre-wrap rounded-xl border border-zinc-200 bg-white p-3 font-mono text-[10px] leading-relaxed text-zinc-600">
+            {JSON.stringify(toolCall.arguments, null, 2)}
+          </pre>
+        </div>
+      )}
     </article>
   );
 }

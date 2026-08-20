@@ -767,24 +767,15 @@
   }
 }
 
-@media (max-width: 900px) {
+@media (max-width: 1024px) {
   .workspace {
-    grid-template-columns: var(--sidebar-width) 1fr;
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "header"
+      "main";
   }
   .workspace.sidebar-collapsed {
-    grid-template-columns: var(--sidebar-width-collapsed) 1fr;
-  }
-  .sidebar-logo-text,
-  .sidebar-nav-item span:not(.icon):not(.badge),
-  .sidebar-section-title {
-    display: none;
-  }
-  .sidebar-nav-item {
-    justify-content: center;
-    padding: var(--space-2);
-  }
-  .sidebar-header {
-    justify-content: center;
+    grid-template-columns: 1fr;
   }
 }
 

@@ -6,7 +6,7 @@ import {
   Download, Cloud, Monitor, Palette, ShieldCheck, X, ChevronDown, ChevronUp, ChevronLeft, ChevronRight,
   Settings, Send, Mic, Paperclip, MoreHorizontal, Sun, Moon, HelpCircle, User, LogOut,
   Bell, Search, Filter, Grid, List, ArrowRight, ArrowLeft, Maximize, Minimize, Gem,
-  PanelLeftOpen, PanelLeftClose
+  PanelLeftOpen, PanelLeftClose, MessageSquarePlus, Trash2
 } from "lucide-react";
 import { useAgent } from "@/hooks/use-agent";
 import { Sidebar } from "@/components/sidebar";
@@ -90,6 +90,8 @@ export default function Home() {
   const [dashboardId, setDashboardId] = useState<string>("");
   const [projectPath, setProjectPath] = useState<string>("");
   const [searchQuery, setSearchQuery] = useState("");
+  const [analystMenuOpen, setAnalystMenuOpen] = useState(false);
+  const analystMenuRef = useRef<HTMLDivElement>(null);
   const hydratedConversations = useRef(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -153,6 +155,24 @@ export default function Home() {
     const interval = setInterval(() => { fetchConfig(); }, 3000);
     return () => clearInterval(interval);
   }, [fetchConfig]);
+
+  useEffect(() => {
+    if (!analystMenuOpen) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (analystMenuRef.current && !analystMenuRef.current.contains(e.target as Node)) {
+        setAnalystMenuOpen(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setAnalystMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onDocClick);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDocClick);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [analystMenuOpen]);
 
   const handleConfigUpdate = async (newConfig: AgentConfig) => {
     try {
@@ -271,6 +291,7 @@ export default function Home() {
         discoveredTools={discoveredTools}
         onReconnect={reconnect}
         onConfigUpdate={handleConfigUpdate}
+        onQuickAction={(prompt) => sendQuery(prompt, reasoningEffort)}
         reasoningEffort={reasoningEffort}
         onReasoningEffortChange={setReasoningEffort}
         conversations={conversationSummaries}
@@ -362,16 +383,59 @@ export default function Home() {
           </div>
 
           {/* User Menu */}
-          <div className="relative">
+          <div className="relative" ref={analystMenuRef}>
             <button
+              onClick={() => setAnalystMenuOpen(!analystMenuOpen)}
               className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 transition-colors"
+              aria-haspopup="menu"
+              aria-expanded={analystMenuOpen}
+              aria-label="Analyst menu"
             >
               <div className="w-8 h-8 rounded-full bg-brand-100 flex items-center justify-center">
                 <Gem className="w-4 h-4 text-brand-600" />
               </div>
               <span className="hidden sm:block text-sm font-medium">Analyst</span>
-              <ChevronDown className="w-4 h-4 text-zinc-400" />
+              <ChevronDown className={`w-4 h-4 text-zinc-400 transition-transform ${analystMenuOpen ? "rotate-180" : ""}`} />
             </button>
+
+            {analystMenuOpen && (
+              <div
+                role="menu"
+                aria-label="Analyst actions"
+                className="absolute right-0 top-full mt-2 w-60 rounded-xl bg-white border border-zinc-200 shadow-xl overflow-hidden z-50 animate-fade-in"
+              >
+                <div className="px-4 py-2.5 border-b border-zinc-100 bg-zinc-50/60">
+                  <p className="text-xs font-semibold text-zinc-900">Analyst</p>
+                  <p className="text-[10px] text-zinc-400">Data Analysis Agent</p>
+                </div>
+                <div className="py-1">
+                  <button
+                    role="menuitem"
+                    onClick={() => { exportConversation(); setAnalystMenuOpen(false); }}
+                    className="w-full flex items-center gap-2 px-4 py-2 text-xs text-zinc-600 hover:text-zinc-900 hover:bg-orange-50 transition-colors text-left"
+                  >
+                    <Download className="w-3.5 h-3.5 text-zinc-400" />
+                    Export conversation
+                  </button>
+                  <button
+                    role="menuitem"
+                    onClick={() => { newConversation(); setAnalystMenuOpen(false); }}
+                    className="w-full flex items-center gap-2 px-4 py-2 text-xs text-zinc-600 hover:text-zinc-900 hover:bg-orange-50 transition-colors text-left"
+                  >
+                    <MessageSquarePlus className="w-3.5 h-3.5 text-zinc-400" />
+                    New conversation
+                  </button>
+                  <button
+                    role="menuitem"
+                    onClick={() => { clearConversation(); setAnalystMenuOpen(false); }}
+                    className="w-full flex items-center gap-2 px-4 py-2 text-xs text-rose-600 hover:text-rose-700 hover:bg-rose-50 transition-colors text-left"
+                  >
+                    <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                    Clear conversation
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Mobile Panel Toggle */}

@@ -26,6 +26,9 @@ import {
   Layers,
   PanelLeftClose,
   PanelLeftOpen,
+  AlertTriangle,
+  Cloud,
+  Palette,
 } from "lucide-react";
 import type { ConnectionStatus, AgentConfig } from "@/types";
 
@@ -41,6 +44,7 @@ interface SidebarProps {
   discoveredTools: string[];
   onReconnect: () => void;
   onConfigUpdate: (newConfig: AgentConfig) => Promise<boolean>;
+  onQuickAction: (prompt: string) => void;
   reasoningEffort: string;
   onReasoningEffortChange: (val: string) => void;
   conversations: ConversationSummary[];
@@ -53,6 +57,41 @@ interface SidebarProps {
   collapsed: boolean;
   onToggleCollapse: () => void;
 }
+
+const QUICK_ACTIONS: { label: string; icon: React.ElementType; prompt: string }[] = [
+  {
+    label: "Analyze performance",
+    icon: BarChart3,
+    prompt: "Analyze my sales performance and highlight the biggest trends.",
+  },
+  {
+    label: "Explore my data",
+    icon: Database,
+    prompt: "What tables and measures are available in my model?",
+  },
+  {
+    label: "Find anomalies",
+    icon: AlertTriangle,
+    prompt: "Find unusual changes or anomalies in my latest data.",
+  },
+  {
+    label: "Create dashboard",
+    icon: Layers,
+    prompt:
+      "Create a sales performance dashboard with KPI cards for revenue, gross profit, and gross margin percentage, a monthly revenue trend line chart, and a revenue by product category bar chart.",
+  },
+  {
+    label: "Run visual QA",
+    icon: ShieldCheck,
+    prompt:
+      "Render the active dashboard pages as images and visually review them for layout, contrast, and truncation issues.",
+  },
+  {
+    label: "Publish to Fabric",
+    icon: Cloud,
+    prompt: "Check cloud readiness and publish the active dashboard to Microsoft Fabric.",
+  },
+];
 
 const PROVIDER_MODELS = {
   gemini: "gemini-3.5-flash",
@@ -124,6 +163,7 @@ export function Sidebar({
   discoveredTools,
   onReconnect,
   onConfigUpdate,
+  onQuickAction,
   reasoningEffort,
   onReasoningEffortChange,
   conversations,
@@ -398,6 +438,33 @@ export function Sidebar({
             </div>
           )}
         </div>
+
+        {/* Quick Actions (capability buttons) */}
+        {!collapsed && (
+          <div className="px-3 pb-2 shrink-0 border-b border-zinc-100">
+            <div className="flex items-center gap-1.5 px-2 py-1.5">
+              <Sparkles className="w-3 h-3 text-orange-400" />
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
+                Quick Actions
+              </span>
+            </div>
+            <div className="grid grid-cols-1 gap-0.5">
+              {QUICK_ACTIONS.map(({ label, icon: Icon, prompt }) => (
+                <button
+                  key={label}
+                  type="button"
+                  onClick={() => onQuickAction(prompt)}
+                  disabled={connectionStatus !== "connected"}
+                  className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-xs text-zinc-600 hover:text-zinc-900 hover:bg-orange-50 hover:border-orange-100 border border-transparent transition-colors text-left disabled:opacity-50 disabled:cursor-not-allowed"
+                  title={label}
+                >
+                  <Icon className="w-3.5 h-3.5 text-orange-500 shrink-0" />
+                  <span className="truncate">{label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Scrollable Conversation List */}
         <div className="flex-1 overflow-y-auto px-2.5 py-1 min-h-0 space-y-3 select-none">

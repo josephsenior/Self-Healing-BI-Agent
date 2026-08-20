@@ -487,6 +487,24 @@ class BigQueryService:
                                 },
                             }
                         ],
+                        "measures": [
+                            {
+                                "name": "Total Revenue",
+                                "expression": f"SUM('{ref.table}'[revenue])",
+                            },
+                            {
+                                "name": "Total Orders",
+                                "expression": f"DISTINCTCOUNT('{ref.table}'[order_id])",
+                            },
+                            {
+                                "name": "Average Order Value",
+                                "expression": f"DIVIDE([Total Revenue], [Total Orders])",
+                            },
+                            {
+                                "name": "Margin Rate",
+                                "expression": f"DIVIDE(SUM('{ref.table}'[gross_profit]), [Total Revenue])",
+                            },
+                        ],
                     }
                 ],
             },

@@ -240,13 +240,25 @@ class BigQueryService:
         self,
         table: str,
         output_root: str | Path,
-        storage_mode: Literal["import", "directQuery"] = "directQuery",
+        storage_mode: Literal["import", "directQuery", "embedded"] = "directQuery",
     ) -> PowerBIModelBinding:
-        """Create a credential-free PBIP semantic model bound to one BigQuery table."""
+        """Create a PBIP semantic model bound to one BigQuery table.
+
+        storage_mode:
+        - "import" / "directQuery": live Power Query connector to BigQuery.
+          Cloud (Fabric) renders require data-source credentials/gateway.
+        - "embedded": rows are snapshotted into the model as a calculated
+          table with no external data source, so Fabric renders work without
+          any cloud credentials. Bounded by BIGQUERY_MAX_ROWS.
+        """
         normalized_mode = str(storage_mode).strip().replace("-", "").replace("_", "").casefold()
-        storage_modes = {"import": "import", "directquery": "directQuery"}
+        storage_modes = {
+            "import": "import",
+            "directquery": "directQuery",
+            "embedded": "embedded",
+        }
         if normalized_mode not in storage_modes:
-            raise ValueError("storage_mode must be 'import' or 'directQuery'")
+            raise ValueError("storage_mode must be 'import', 'directQuery', or 'embedded'")
         storage_mode = storage_modes[normalized_mode]
         ref = self.table(table)
         resource = self.client.get_table(ref.full_name)
@@ -260,6 +272,61 @@ class BigQueryService:
         )
         model_dir.mkdir(parents=True, exist_ok=True)
 
+        if storage_mode == "embedded":
+            model = self._embedded_model(ref, fields, catalog)
+        else:
+            model = self._connector_model(ref, fields, storage_mode)
+
+        _validate_model_definition(model)
+        self._write_json(
+            model_dir / "definition.pbism",
+            {
+                "$schema": (
+                    "https://developer.microsoft.com/json-schemas/fabric/item/"
+                    "semanticModel/definitionProperties/1.0.0/schema.json"
+                ),
+                "version": "4.2",
+                "settings": {"qnaEnabled": True},
+            },
+        )
+        self._write_json(model_dir / "model.bim", model)
+        self._write_json(
+            model_dir / "bigquery-binding.json",
+            {
+                "billing_project": self.settings.project_id,
+                "source": ref.full_name,
+                "storage_mode": storage_mode,
+                "connector_implementation": (
+                    "none" if storage_mode == "embedded"
+                    else self.settings.powerbi_implementation
+                ),
+                "uses_storage_api": (
+                    False if storage_mode == "embedded"
+                    else self.settings.powerbi_use_storage_api
+                ),
+                "credential_material_embedded": storage_mode == "embedded",
+            },
+        )
+        return PowerBIModelBinding(
+            semantic_model_path=str(model_dir),
+            table=ref.full_name,
+            storage_mode=storage_mode,
+            connector_implementation=(
+                "none" if storage_mode == "embedded"
+                else self.settings.powerbi_implementation
+            ),
+            uses_storage_api=(
+                False if storage_mode == "embedded"
+                else self.settings.powerbi_use_storage_api
+            ),
+            requires_powerbi_credentials=storage_mode != "embedded",
+            catalog=catalog.model_dump(),
+        )
+
+    def _connector_model(
+        self, ref: TableReference, fields: Any, storage_mode: str
+    ) -> dict[str, Any]:
+        """Build a live Power Query model bound to the BigQuery connector."""
         options = [
             f'BillingProject="{self.settings.project_id}"',
             f'Implementation="{self.settings.powerbi_implementation}"',
@@ -294,7 +361,7 @@ class BigQueryService:
                 column["formatString"] = "yyyy-MM-dd"
             columns.append(column)
 
-        model = {
+        return {
             "name": f"{ref.table} BigQuery Model",
             "compatibilityLevel": 1600,
             "model": {
@@ -320,38 +387,110 @@ class BigQueryService:
                 ],
             },
         }
-        _validate_model_definition(model)
-        self._write_json(
-            model_dir / "definition.pbism",
-            {
-                "$schema": (
-                    "https://developer.microsoft.com/json-schemas/fabric/item/"
-                    "semanticModel/definitionProperties/1.0.0/schema.json"
-                ),
-                "version": "4.2",
-                "settings": {"qnaEnabled": True},
+
+    def _embedded_model(
+        self,
+        ref: TableReference,
+        fields: Any,
+        catalog: SemanticModelCatalog,
+    ) -> dict[str, Any]:
+        """Build a data-source-free model with rows embedded as a calculated table.
+
+        The calculated table uses ROW() expressions, the same technique the
+        cloud qualification runner uses: Fabric accepts it consistently when a
+        TMSL definition is created through the public API, and the model needs
+        no gateway, credentials, or refresh. Bounded by BIGQUERY_MAX_ROWS.
+        """
+        try:
+            from google.cloud import bigquery
+        except ImportError as exc:
+            raise RuntimeError(
+                "BigQuery support requires google-cloud-bigquery; run pip install -r requirements.txt"
+            ) from exc
+        job = self.client.query(
+            f"SELECT * FROM `{ref.full_name}`",
+            job_config=bigquery.QueryJobConfig(
+                maximum_bytes_billed=self.settings.max_bytes_billed,
+                use_legacy_sql=False,
+            ),
+            location=self.settings.location or None,
+        )
+        rows = list(job.result(max_results=self.settings.max_rows))
+        if not rows:
+            raise ValueError(f"BigQuery table {ref.full_name!r} returned no rows to embed")
+
+        field_by_name = {field.name: field for field in fields}
+
+        def m_literal(value: Any, field_type: str) -> str:
+            if value is None:
+                return "null"
+            normalized = field_type.upper()
+            if normalized in {"DATE"}:
+                return f"#date({value.year},{value.month},{value.day})"
+            if normalized in {"DATETIME", "TIMESTAMP"}:
+                return (
+                    f"#datetime({value.year},{value.month},{value.day},"
+                    f"{value.hour},{value.minute},{value.second})"
+                )
+            if isinstance(value, bool):
+                return "true" if value else "false"
+            if isinstance(value, (int, float)):
+                return repr(value)
+            return f'"{str(value).replace(chr(34), chr(34) * 2)}"'
+
+        row_expressions = [
+            "ROW("
+            + ", ".join(
+                f'"{field.name}", {m_literal(row[field.name], field.field_type)}'
+                for field in fields
+            )
+            + ")"
+            for row in rows
+        ]
+        expression = " & ".join(row_expressions)
+
+        columns = []
+        for field in fields:
+            column = {
+                "type": "calculatedTableColumn",
+                "name": field.name,
+                "dataType": self._tabular_type(field.field_type),
+                "sourceColumn": f"[{field.name}]",
+                "summarizeBy": "none",
+            }
+            if field.field_type.upper() == "DATE":
+                column["formatString"] = "yyyy-MM-dd"
+            columns.append(column)
+
+        return {
+            "name": f"{ref.table} BigQuery Model",
+            "compatibilityLevel": 1600,
+            "model": {
+                "culture": "en-US",
+                "defaultPowerBIDataSourceVersion": "powerBI_V3",
+                "discourageImplicitMeasures": True,
+                "tables": [
+                    {
+                        "name": ref.table,
+                        "description": (
+                            f"Embedded snapshot of {ref.full_name} "
+                            f"({len(rows)} rows, no external data source)"
+                        ),
+                        "columns": columns,
+                        "partitions": [
+                            {
+                                "name": ref.table,
+                                "mode": "import",
+                                "source": {
+                                    "type": "calculated",
+                                    "expression": expression,
+                                },
+                            }
+                        ],
+                    }
+                ],
             },
-        )
-        self._write_json(model_dir / "model.bim", model)
-        self._write_json(
-            model_dir / "bigquery-binding.json",
-            {
-                "billing_project": self.settings.project_id,
-                "source": ref.full_name,
-                "storage_mode": storage_mode,
-                "connector_implementation": self.settings.powerbi_implementation,
-                "uses_storage_api": self.settings.powerbi_use_storage_api,
-                "credential_material_embedded": False,
-            },
-        )
-        return PowerBIModelBinding(
-            semantic_model_path=str(model_dir),
-            table=ref.full_name,
-            storage_mode=storage_mode,
-            connector_implementation=self.settings.powerbi_implementation,
-            uses_storage_api=self.settings.powerbi_use_storage_api,
-            catalog=catalog.model_dump(),
-        )
+        }
 
     def query(self, sql: str, max_rows: int | None = None) -> dict[str, Any]:
         normalized = sql.strip()

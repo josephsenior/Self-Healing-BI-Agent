@@ -237,9 +237,16 @@ def bigquery_semantic_catalog(table: str) -> str:
 @mcp.tool()
 def bigquery_create_powerbi_semantic_model(
     table: str,
-    storage_mode: Literal["import", "directQuery"] = "directQuery",
+    storage_mode: Literal["import", "directQuery", "embedded"] = "directQuery",
 ) -> str:
-    """Create a local PBIP semantic model. storage_mode is exactly import or directQuery."""
+    """Create a local PBIP semantic model. storage_mode is exactly import, directQuery, or embedded.
+
+    Use embedded when the report must render with data in the Fabric cloud
+    without configuring BigQuery data-source credentials or a gateway: rows are
+    snapshotted into the model, so cloud renders work with no external
+    connection. import/directQuery keep a live BigQuery connector and require
+    cloud data-source credentials when rendered in Fabric.
+    """
     result = _bigquery_service().create_powerbi_model(
         table,
         AUTHORING_ROOT / ".bigquery-models",
@@ -252,7 +259,8 @@ def bigquery_create_powerbi_semantic_model(
             "In DashboardSpec set dataset.path to dataset_reference_path (relative). "
             "Pass semantic_model_path separately to create_dashboard_workspace and pass "
             "the exact catalog returned by this tool. "
-            "Power BI Desktop may require one-time Google data-source sign-in."
+            "Power BI Desktop may require one-time Google data-source sign-in. "
+            "For Fabric cloud rendering with no credentials, use storage_mode=embedded."
         ),
     }, indent=2)
 

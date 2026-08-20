@@ -581,6 +581,36 @@ def list_powerbi_cloud_semantic_models() -> str:
 
 
 @mcp.tool()
+def create_powerbi_cloud_semantic_model(
+    semantic_model_path: str,
+    display_name: str = "",
+    semantic_model_id: str = "",
+) -> str:
+    """Create or update a semantic model in the Fabric workspace from a local PBIP model folder.
+
+    Use the absolute semantic_model_path returned by
+    bigquery_create_powerbi_semantic_model. If a model with the same display
+    name already exists in the workspace it is updated; otherwise a new one is
+    created. Returns the semantic_model_id to pass to publish_pbir_to_fabric.
+    """
+    from report_authoring.cloud import CloudConfig, PowerBICloudClient
+
+    model_root = _allowed_authoring_path(semantic_model_path)
+    result = PowerBICloudClient(CloudConfig.from_env()).ensure_semantic_model(
+        display_name or model_root.name.removesuffix(".SemanticModel"),
+        model_root,
+        known_id=semantic_model_id or None,
+    )
+    return json.dumps({
+        **result,
+        "next_action": (
+            "Pass the returned semantic_model_id to publish_pbir_to_fabric "
+            "so the report definition references the cloud semantic model."
+        ),
+    }, indent=2)
+
+
+@mcp.tool()
 def get_powerbi_cloud_semantic_catalog(semantic_model_id: str) -> str:
     """Read tables, columns, and measures from a cloud semantic model."""
     from report_authoring.cloud import CloudConfig, PowerBICloudClient

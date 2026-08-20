@@ -357,6 +357,81 @@ class PowerBICloudClient:
             url = str(payload.get("continuationUri") or "")
         return models
 
+    def ensure_semantic_model(
+        self,
+        display_name: str,
+        model_dir: str | Path,
+        known_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Create or update a cloud semantic model from a local PBIP model folder.
+
+        The local folder must contain definition.pbism and model.bim, exactly
+        like the folders produced by bigquery_create_powerbi_semantic_model.
+        """
+        root = Path(model_dir).resolve()
+        if not root.is_dir():
+            raise CloudAPIError(f"semantic model folder does not exist: {root}")
+        payloads: dict[str, bytes] = {}
+        for filename in ("definition.pbism", "model.bim"):
+            candidate = root / filename
+            if not candidate.is_file():
+                raise CloudAPIError(
+                    f"semantic model folder is missing {filename}: {root}"
+                )
+            payloads[filename] = candidate.read_bytes()
+        definition = {
+            "format": "TMSL",
+            "parts": [
+                {
+                    "path": filename,
+                    "payload": base64.b64encode(payload).decode("ascii"),
+                    "payloadType": "InlineBase64",
+                }
+                for filename, payload in payloads.items()
+            ],
+        }
+        selected_id = known_id or next(
+            (
+                str(model.get("id", ""))
+                for model in self.list_semantic_models()
+                if model.get("displayName") == display_name
+            ),
+            None,
+        )
+        if selected_id:
+            response = self.client.post(
+                f"{FABRIC_API}/workspaces/{self.config.workspace_id}/semanticModels/"
+                f"{selected_id}/updateDefinition",
+                headers=self._headers(FABRIC_SCOPE),
+                json={"definition": definition},
+            )
+            _ensure_success(response, "update Power BI semantic model")
+            self._complete_definition(response)
+            return {
+                "action": "updated",
+                "workspace_id": self.config.workspace_id,
+                "semantic_model_id": selected_id,
+                "display_name": display_name,
+            }
+        response = self.client.post(
+            f"{FABRIC_API}/workspaces/{self.config.workspace_id}/semanticModels",
+            headers=self._headers(FABRIC_SCOPE),
+            json={"displayName": display_name, "definition": definition},
+        )
+        _ensure_success(response, "create Power BI semantic model")
+        result = self._complete_definition(response)
+        model_id = str(result.get("id", ""))
+        if not model_id:
+            raise CloudAPIError(
+                "semantic-model create response did not include a semantic model id"
+            )
+        return {
+            "action": "created",
+            "workspace_id": self.config.workspace_id,
+            "semantic_model_id": model_id,
+            "display_name": str(result.get("displayName") or display_name),
+        }
+
     def semantic_catalog(self, semantic_model_id: str) -> SemanticModelCatalog:
         response = self.client.post(
             f"{FABRIC_API}/workspaces/{self.config.workspace_id}/semanticModels/"

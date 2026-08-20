@@ -294,7 +294,7 @@ export function Sidebar({
                 </div>
                 <div className="min-w-0">
                   <div className="flex items-center gap-1.5">
-                    <span className="font-semibold text-sm tracking-tight text-zinc-900 leading-none">Prism</span>
+                    <span className="font-semibold text-sm tracking-tight text-zinc-900 leading-none">Data Analysis Agent</span>
                     <span className="px-1.5 py-0.5 text-[10px] font-medium tracking-wide text-blue-700 bg-blue-50 rounded border border-blue-100/60 leading-none">
                       AI
                     </span>

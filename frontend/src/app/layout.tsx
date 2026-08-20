@@ -5,8 +5,8 @@ import "./globals.css";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Prism — Intelligence Platform",
-  description: "Autonomous AI platform for data analysis, dashboard authoring, and semantic modeling",
+  title: "Data Analysis Agent",
+  description: "Autonomous AI agent for data analysis, dashboard authoring, and semantic modeling",
 };
 
 export default function RootLayout({

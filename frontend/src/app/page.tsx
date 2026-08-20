@@ -238,7 +238,7 @@ export default function Home() {
     const statusConfig = {
       idle: null,
       starting_agent: { label: "Preparing analysis…", icon: <RefreshCw className="w-3 h-3 animate-spin text-zinc-500" />, className: "bg-zinc-100 text-zinc-700 border-zinc-200" },
-      mcp_connected: { label: "Prism tools ready", icon: <RefreshCw className="w-3 h-3 animate-spin text-zinc-500" />, className: "bg-zinc-100 text-zinc-700 border-zinc-200" },
+      mcp_connected: { label: "Tools ready", icon: <RefreshCw className="w-3 h-3 animate-spin text-zinc-500" />, className: "bg-zinc-100 text-zinc-700 border-zinc-200" },
       running: { label: "Analyzing your data…", icon: <RefreshCw className="w-3 h-3 animate-spin text-zinc-500" />, className: "bg-zinc-100 text-zinc-700 border-zinc-200" },
       complete: { label: "Analysis complete", icon: null, className: "bg-zinc-100 text-zinc-700 border-zinc-200" },
       error: { label: "Analysis needs attention", icon: null, className: "bg-red-50 text-red-700 border-red-100" },
@@ -399,7 +399,7 @@ export default function Home() {
               <span className="flex items-center gap-2">
                 {connectionStatus === "error" ? <AlertTriangle className="w-4 h-4" /> : <RefreshCw className="w-4 h-4 animate-spin" />}
                 {connectionStatus === "error"
-                  ? "Prism connection error. Your conversation is safe; reconnect to continue."
+                  ? "Connection error. Your conversation is safe; reconnect to continue."
                   : "Connection lost. Reconnecting automatically…"}
               </span>
               {connectionStatus === "error" && (

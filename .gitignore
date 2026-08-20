@@ -50,3 +50,9 @@ htmlcov/
 .pbir-previews/
 .dashboard-workspaces/
 static/
+
+# BigQuery model files
+.bigquery-models/
+
+# Functional audit data
+.functional-audit/

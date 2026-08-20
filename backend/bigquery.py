@@ -396,9 +396,9 @@ class BigQueryService:
     ) -> dict[str, Any]:
         """Build a data-source-free model with rows embedded as a calculated table.
 
-        The calculated table uses ROW() expressions, the same technique the
-        cloud qualification runner uses: Fabric accepts it consistently when a
-        TMSL definition is created through the public API, and the model needs
+        The calculated table uses ROW()/UNION() expressions, the same technique
+        the cloud qualification runner uses: Fabric accepts it consistently when
+        a TMSL definition is created through the public API, and the model needs
         no gateway, credentials, or refresh. Bounded by BIGQUERY_MAX_ROWS.
         """
         try:
@@ -425,13 +425,10 @@ class BigQueryService:
             if value is None:
                 return "null"
             normalized = field_type.upper()
-            if normalized in {"DATE"}:
-                return f"#date({value.year},{value.month},{value.day})"
+            if normalized == "DATE":
+                return f'"{value.strftime("%Y-%m-%d")}"'
             if normalized in {"DATETIME", "TIMESTAMP"}:
-                return (
-                    f"#datetime({value.year},{value.month},{value.day},"
-                    f"{value.hour},{value.minute},{value.second})"
-                )
+                return f'"{value.strftime("%Y-%m-%d %H:%M:%S")}"'
             if isinstance(value, bool):
                 return "true" if value else "false"
             if isinstance(value, (int, float)):
@@ -447,7 +444,10 @@ class BigQueryService:
             + ")"
             for row in rows
         ]
-        expression = " & ".join(row_expressions)
+        if len(row_expressions) == 1:
+            expression = row_expressions[0]
+        else:
+            expression = "UNION(" + ", ".join(row_expressions) + ")"
 
         columns = []
         for field in fields:

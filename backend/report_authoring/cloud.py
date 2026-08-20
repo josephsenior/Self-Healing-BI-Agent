@@ -316,7 +316,9 @@ class PowerBICloudClient:
             "Content-Type": "application/json",
         }
 
-    def _complete_definition(self, response: httpx.Response) -> dict[str, Any]:
+    def _complete_definition(
+        self, response: httpx.Response, *, expect_result: bool = True
+    ) -> dict[str, Any]:
         if response.status_code != 202:
             return _response_json(response)
         location = response.headers.get("Location", "").rstrip("/")
@@ -334,6 +336,8 @@ class PowerBICloudClient:
             _ensure_success(state_response, "poll semantic-model definition")
             state = _response_json(state_response)
             if state.get("status") == "Succeeded":
+                if not expect_result:
+                    return {}
                 result_response = self.client.get(
                     f"{operation_url}/result", headers=self._headers(FABRIC_SCOPE)
                 )
@@ -356,6 +360,38 @@ class PowerBICloudClient:
             models.extend(payload.get("value", []))
             url = str(payload.get("continuationUri") or "")
         return models
+
+    def refresh_model(self, semantic_model_id: str) -> dict[str, Any]:
+        """Trigger and wait for an on-demand refresh of a cloud semantic model."""
+        url = (
+            f"{POWERBI_API}/groups/{self.config.workspace_id}/datasets/"
+            f"{semantic_model_id}/refreshes"
+        )
+        response = self.client.post(
+            url,
+            headers=self._headers(POWERBI_SCOPE),
+            json={"notifyOption": "NoNotification"},
+        )
+        _ensure_success(response, "start semantic-model refresh")
+        deadline = time.monotonic() + self.config.timeout_seconds
+        while time.monotonic() < deadline:
+            status_response = self.client.get(
+                f"{url}?$top=1", headers=self._headers(POWERBI_SCOPE)
+            )
+            _ensure_success(status_response, "poll semantic-model refresh")
+            refreshes = _response_json(status_response).get("value", [])
+            status = str(refreshes[0].get("status", "")) if refreshes else ""
+            if status == "Completed":
+                return {"status": status}
+            if status in {"Failed", "Disabled", "Cancelled"}:
+                detail = (
+                    refreshes[0].get("serviceExceptionJson")
+                    if refreshes
+                    else status
+                )
+                raise CloudAPIError(f"semantic-model refresh failed: {detail}")
+            self.sleep(self.config.poll_interval_seconds)
+        raise TimeoutError("semantic-model refresh exceeded the configured timeout")
 
     def ensure_semantic_model(
         self,
@@ -406,12 +442,14 @@ class PowerBICloudClient:
                 json={"definition": definition},
             )
             _ensure_success(response, "update Power BI semantic model")
-            self._complete_definition(response)
+            self._complete_definition(response, expect_result=False)
+            refresh = self.refresh_model(selected_id)
             return {
                 "action": "updated",
                 "workspace_id": self.config.workspace_id,
                 "semantic_model_id": selected_id,
                 "display_name": display_name,
+                "refresh": refresh,
             }
         response = self.client.post(
             f"{FABRIC_API}/workspaces/{self.config.workspace_id}/semanticModels",
@@ -425,11 +463,13 @@ class PowerBICloudClient:
             raise CloudAPIError(
                 "semantic-model create response did not include a semantic model id"
             )
+        refresh = self.refresh_model(model_id)
         return {
             "action": "created",
             "workspace_id": self.config.workspace_id,
             "semantic_model_id": model_id,
             "display_name": str(result.get("displayName") or display_name),
+            "refresh": refresh,
         }
 
     def semantic_catalog(self, semantic_model_id: str) -> SemanticModelCatalog:

@@ -1,6 +1,6 @@
 from .compiler import CompilationResult, compile_report
 from .models import DashboardSpec
-from .pbir import inspect_pbir_project, validate_pbir_project
+from .pbir import inspect_pbir_project, validate_pbir_project, validate_semantic_model
 from .cloud import (
     CloudConfig,
     FabricReportPublisher,
@@ -31,6 +31,7 @@ __all__ = [
     "compile_report",
     "inspect_pbir_project",
     "validate_pbir_project",
+    "validate_semantic_model",
     "CloudConfig",
     "FabricReportPublisher",
     "PowerBICloudClient",

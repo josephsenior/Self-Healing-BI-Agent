@@ -53,6 +53,169 @@ def _load_json(path: Path, issues: list[ValidationIssue]) -> dict[str, Any] | No
         return None
 
 
+_DAX_BUILTIN_FUNCTIONS = {
+    "SUM", "AVERAGE", "COUNT", "COUNTA", "COUNTBLANK", "DISTINCTCOUNT",
+    "MIN", "MAX", "STDEV", "VAR", "MEDIAN", "RANKX", "DIVIDE",
+    "CALCULATE", "FILTER", "ALL", "VALUES", "SUMX", "AVERAGEX",
+    "COUNTX", "FILTERX", "MAXX", "MINX", "SELECTEDVALUE", "IF",
+    "SWITCH", "FORMAT", "CONCATENATE", "LEFT", "RIGHT", "MID",
+    "LEN", "TRIM", "UPPER", "LOWER", "DATE", "YEAR", "MONTH", "DAY",
+    "TODAY", "NOW", "DATEDIFF", "DATEADD", "YEARFRAC",
+}
+
+_M_BUILTIN_FUNCTIONS = {
+    "let", "in", "if", "then", "else", "each", "as", "meta",
+    "error", "try", "otherwise", "section", "shared",
+}
+
+
+def _validate_dax_expression(expr: str, path: str, issues: list[ValidationIssue]) -> None:
+    """Basic DAX expression syntax check."""
+    if not expr or not expr.strip():
+        issues.append(ValidationIssue("error", "empty_dax", "DAX expression is empty", path))
+        return
+    # Check balanced brackets
+    bracket_depth = 0
+    for ch in expr:
+        if ch == "[":
+            bracket_depth += 1
+        elif ch == "]":
+            bracket_depth -= 1
+        if bracket_depth < 0:
+            issues.append(ValidationIssue("error", "unbalanced_bracket", "Unexpected ']' in DAX expression", path))
+            return
+    if bracket_depth != 0:
+        issues.append(ValidationIssue("error", "unbalanced_bracket", "Unbalanced '[' in DAX expression", path))
+    # Check balanced parentheses
+    paren_depth = 0
+    for ch in expr:
+        if ch == "(":
+            paren_depth += 1
+        elif ch == ")":
+            paren_depth -= 1
+        if paren_depth < 0:
+            issues.append(ValidationIssue("error", "unbalanced_paren", "Unexpected ')' in DAX expression", path))
+            return
+    if paren_depth != 0:
+        issues.append(ValidationIssue("error", "unbalanced_paren", "Unbalanced '(' in DAX expression", path))
+
+
+def _validate_m_expression(expr_lines: list[str], path: str, issues: list[ValidationIssue]) -> None:
+    """Validate M expression syntax (shared between bigquery.py and here)."""
+    from backend.bigquery import _validate_m_expression as _bq_validate
+    try:
+        _bq_validate(expr_lines)
+    except ValueError as exc:
+        issues.append(ValidationIssue("error", "invalid_m_expression", str(exc), path))
+
+
+def validate_semantic_model(model_path: str | Path) -> ValidationReport:
+    """Validate a .SemanticModel folder containing model.bim and definition.pbism."""
+    model_root = Path(model_path).resolve()
+    issues: list[ValidationIssue] = []
+
+    # Check required files exist
+    pbism = model_root / "definition.pbism"
+    model_bim = model_root / "model.bim"
+    for required_file in [pbism, model_bim]:
+        if not required_file.is_file():
+            issues.append(ValidationIssue(
+                "error", "missing_file", f"Required file missing: {required_file.name}", str(required_file)
+            ))
+    if issues:
+        return ValidationReport(False, issues)
+
+    # Validate definition.pbism
+    pbism_doc = _load_json(pbism, issues)
+    if pbism_doc:
+        if "version" not in pbism_doc:
+            issues.append(ValidationIssue("error", "missing_version", "definition.pbism missing 'version'", str(pbism)))
+        if "$schema" not in pbism_doc:
+            issues.append(ValidationIssue("warning", "missing_schema", "definition.pbism missing $schema", str(pbism)))
+
+    # Validate model.bim
+    model = _load_json(model_bim, issues)
+    if not model:
+        return ValidationReport(False, issues)
+
+    # Top-level structure
+    if "compatibilityLevel" not in model:
+        issues.append(ValidationIssue("error", "missing_compat_level", "model.bim missing compatibilityLevel", str(model_bim)))
+    if "model" not in model:
+        issues.append(ValidationIssue("error", "missing_model", "model.bim missing 'model' object", str(model_bim)))
+        return ValidationReport(False, issues)
+
+    model_inner = model["model"]
+    if "tables" not in model_inner:
+        issues.append(ValidationIssue("error", "no_tables", "model has no tables", str(model_bim)))
+        return ValidationReport(False, issues)
+
+    # Validate each table
+    for table in model_inner["tables"]:
+        table_name = table.get("name", "<unnamed>")
+        table_path = f"{model_bim}#/tables/{table_name}"
+
+        if "name" not in table:
+            issues.append(ValidationIssue("error", "table_no_name", "Table missing 'name'", table_path))
+        if "columns" not in table or not table.get("columns"):
+            issues.append(ValidationIssue("error", "table_no_columns", f"Table '{table_name}' has no columns", table_path))
+        if "partitions" not in table or not table.get("partitions"):
+            issues.append(ValidationIssue("error", "table_no_partitions", f"Table '{table_name}' has no partitions", table_path))
+
+        # Validate columns
+        for col in table.get("columns", []):
+            col_name = col.get("name", "<unnamed>")
+            col_path = f"{table_path}/columns/{col_name}"
+            if "dataType" not in col:
+                issues.append(ValidationIssue("error", "col_no_datatype", f"Column '{col_name}' missing dataType", col_path))
+            if "name" not in col:
+                issues.append(ValidationIssue("error", "col_no_name", "Column missing 'name'", col_path))
+
+        # Validate measures
+        for measure in table.get("measures", []):
+            measure_name = measure.get("name", "<unnamed>")
+            measure_path = f"{table_path}/measures/{measure_name}"
+            if "name" not in measure:
+                issues.append(ValidationIssue("error", "measure_no_name", "Measure missing 'name'", measure_path))
+            expr = measure.get("expression")
+            if isinstance(expr, str):
+                _validate_dax_expression(expr, measure_path, issues)
+            elif isinstance(expr, list):
+                combined = " ".join(str(e) for e in expr)
+                _validate_dax_expression(combined, measure_path, issues)
+
+        # Validate partitions
+        for partition in table.get("partitions", []):
+            part_name = partition.get("name", "<unnamed>")
+            part_path = f"{table_path}/partitions/{part_name}"
+            source = partition.get("source", {})
+            if "type" not in source:
+                issues.append(ValidationIssue("error", "partition_no_type", f"Partition '{part_name}' missing source type", part_path))
+            if source.get("type") == "m":
+                expr_lines = source.get("expression", [])
+                if not expr_lines:
+                    issues.append(ValidationIssue("error", "partition_empty_m", f"Partition '{part_name}' has empty M expression", part_path))
+                else:
+                    _validate_m_expression(expr_lines, part_path, issues)
+
+    # Validate relationships
+    for rel in model_inner.get("relationships", []):
+        from_table = rel.get("fromTable")
+        to_table = rel.get("toTable")
+        from_col = rel.get("fromColumn")
+        to_col = rel.get("toColumn")
+        rel_path = f"{model_bim}#/relationships/{from_table}.{from_col}->{to_table}.{to_col}"
+        if not from_table or not to_table:
+            issues.append(ValidationIssue("error", "rel_incomplete", "Relationship missing fromTable/toTable", rel_path))
+        if not from_col or not to_col:
+            issues.append(ValidationIssue("error", "rel_incomplete", "Relationship missing fromColumn/toColumn", rel_path))
+
+    return ValidationReport(
+        not any(issue.severity == "error" for issue in issues),
+        issues,
+    )
+
+
 def inspect_pbir_project(path: str | Path) -> dict[str, Any]:
     root = _report_root(path)
     report = validate_pbir_project(root)

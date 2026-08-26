@@ -414,9 +414,65 @@ class DashboardWorkspaceManager:
                 gates.append(QAGateResult(
                     "desktop_binding", GateStatus.FAILED, 1, str(exc)
                 ))
+            # Runtime guarantee: semantic model must be officially valid before Desktop open
+            # This prevents user from ever seeing a Desktop syntax/crash error
+            from .pbir import validate_semantic_model as _validate_semantic_model
+            try:
+                model_report = _validate_semantic_model(semantic_model_path)
+                if not model_report.valid:
+                    for item in model_report.issues:
+                        findings.append(QAFinding(
+                            FindingClass.BLOCKING if item.severity == "error" else FindingClass.IMPROVEMENT,
+                            "semantic_model",
+                            item.code,
+                            item.message,
+                        ))
+                    gates.append(QAGateResult(
+                        "semantic_model", GateStatus.FAILED,
+                        sum(1 for i in model_report.issues if i.severity == "error"),
+                        f"{len(model_report.issues)} issues",
+                    ))
+                else:
+                    gates.append(QAGateResult("semantic_model", GateStatus.PASSED))
+            except Exception as exc:
+                findings.append(QAFinding(
+                    FindingClass.BLOCKING,
+                    "semantic_model",
+                    "validation_error",
+                    str(exc),
+                ))
+                gates.append(QAGateResult("semantic_model", GateStatus.FAILED, 1, str(exc)))
+            # CompatibilityLevel gate — the one fatal non-diagnostic Desktop crash
+            try:
+                from .desktop_version import detect_compatibility_level, validate_compatibility_level
+                import json as _json_ws
+                model_bim_ws = Path(semantic_model_path) / "model.bim"
+                if model_bim_ws.is_file():
+                    _m = _json_ws.loads(model_bim_ws.read_text(encoding="utf-8"))
+                    _lvl = _m.get("compatibilityLevel", 0)
+                    if not validate_compatibility_level(_lvl):
+                        findings.append(QAFinding(
+                            FindingClass.BLOCKING, "compatibility_level",
+                            "version_mismatch",
+                            f"Model compatibilityLevel {_lvl} exceeds installed Desktop level {detect_compatibility_level()}",
+                        ))
+                        gates.append(QAGateResult("compatibility_level", GateStatus.FAILED, 1, f"level {_lvl} > installed"))
+                    else:
+                        gates.append(QAGateResult("compatibility_level", GateStatus.PASSED))
+                else:
+                    gates.append(QAGateResult("compatibility_level", GateStatus.PASSED))
+            except Exception as exc:
+                findings.append(QAFinding(FindingClass.BLOCKING, "compatibility_level", "validation_error", str(exc)))
+                gates.append(QAGateResult("compatibility_level", GateStatus.FAILED, 1, str(exc)))
         else:
             gates.append(QAGateResult(
                 "desktop_binding", GateStatus.BLOCKED, detail="compile failed"
+            ))
+            gates.append(QAGateResult(
+                "semantic_model", GateStatus.BLOCKED, detail="compile failed"
+            ))
+            gates.append(QAGateResult(
+                "compatibility_level", GateStatus.BLOCKED, detail="compile failed"
             ))
 
         structural_validation = None

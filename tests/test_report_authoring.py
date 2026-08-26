@@ -554,9 +554,41 @@ class DesktopVisualHandoffTests(unittest.TestCase):
 
 class StatefulDashboardWorkspaceTests(unittest.TestCase):
     def _model(self, root: Path) -> Path:
+        import json as _json
+        from backend.report_authoring.desktop_version import detect_compatibility_level
         model = root / "Sales.SemanticModel"
-        model.mkdir()
-        (model / "definition.pbism").write_text("{}", encoding="utf-8")
+        model.mkdir(parents=True, exist_ok=True)
+        (model / "definition.pbism").write_text(_json.dumps({
+            "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/semanticModel/definitionProperties/1.0.0/schema.json",
+            "version": "4.2",
+        }, indent=2) + "\n", encoding="utf-8")
+        (model / "model.bim").write_text(_json.dumps({
+            "compatibilityLevel": detect_compatibility_level(),
+            "model": {
+                "tables": [
+                    {
+                        "name": "Sales",
+                        "columns": [
+                            {"name": "__Revenue_Value", "dataType": "double", "sourceColumn": "Revenue"},
+                            {"name": "Month", "dataType": "string", "sourceColumn": "Month"},
+                        ],
+                        "measures": [
+                            {"name": "Revenue", "expression": "SUM('Sales'[__Revenue_Value])", "formatString": "#,0"},
+                        ],
+                        "partitions": [
+                            {"name": "p", "mode": "import", "source": {"type": "m", "expression": ["let", "    x = 1", "in", "    x"]}},
+                        ],
+                    },
+                    {
+                        "name": "Date",
+                        "columns": [{"name": "Month", "dataType": "string", "sourceColumn": "Month"}],
+                        "partitions": [
+                            {"name": "p", "mode": "import", "source": {"type": "m", "expression": ["let", "    x = 1", "in", "    x"]}},
+                        ],
+                    },
+                ],
+            },
+        }, indent=2) + "\n", encoding="utf-8")
         return model
 
     @staticmethod

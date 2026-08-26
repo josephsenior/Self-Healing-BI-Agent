@@ -403,6 +403,9 @@ class PowerBICloudClient:
 
         The local folder must contain definition.pbism and model.bim, exactly
         like the folders produced by bigquery_create_powerbi_semantic_model.
+
+        Embedded models (all partitions are calculated tables) skip the refresh
+        step because data is already baked into the TMSL definition.
         """
         root = Path(model_dir).resolve()
         if not root.is_dir():
@@ -415,6 +418,26 @@ class PowerBICloudClient:
                     f"semantic model folder is missing {filename}: {root}"
                 )
             payloads[filename] = candidate.read_bytes()
+        # Detect embedded models: all partitions are calculated tables.
+        # Embedded models have data baked in and do not need a refresh.
+        is_embedded = False
+        model_bim_path = root / "model.bim"
+        if model_bim_path.is_file():
+            try:
+                model_bim = json.loads(model_bim_path.read_text(encoding="utf-8"))
+                tables = model_bim.get("model", {}).get("tables", [])
+                if tables:
+                    all_calculated = all(
+                        all(
+                            partition.get("source", {}).get("type") == "calculated"
+                            for partition in table.get("partitions", [])
+                        )
+                        for table in tables
+                        if table.get("partitions")
+                    )
+                    is_embedded = all_calculated
+            except (json.JSONDecodeError, OSError):
+                pass
         definition = {
             "format": "TMSL",
             "parts": [
@@ -443,7 +466,7 @@ class PowerBICloudClient:
             )
             _ensure_success(response, "update Power BI semantic model")
             self._complete_definition(response, expect_result=False)
-            refresh = self.refresh_model(selected_id)
+            refresh = {} if is_embedded else self.refresh_model(selected_id)
             return {
                 "action": "updated",
                 "workspace_id": self.config.workspace_id,
@@ -463,7 +486,7 @@ class PowerBICloudClient:
             raise CloudAPIError(
                 "semantic-model create response did not include a semantic model id"
             )
-        refresh = self.refresh_model(model_id)
+        refresh = {} if is_embedded else self.refresh_model(model_id)
         return {
             "action": "created",
             "workspace_id": self.config.workspace_id,

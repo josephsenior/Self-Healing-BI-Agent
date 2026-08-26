@@ -363,6 +363,27 @@ class DashboardWorkspaceManager:
             build = compile_report(spec, dashboard_root / "candidate-builds")
             report_path = build.report_path
             pbir_path = str(Path(report_path) / "definition.pbir")
+            # Validate compatibility level against installed Desktop
+            from .desktop_version import detect_compatibility_level, validate_compatibility_level
+            model_bim = Path(report_path).parent / f"{Path(report_path).name}.SemanticModel" / "model.bim"
+            if model_bim.exists():
+                import json as _json
+                model = _json.loads(model_bim.read_text(encoding="utf-8"))
+                model_level = model.get("compatibilityLevel", 0)
+                if not validate_compatibility_level(model_level):
+                    findings.append(QAFinding(
+                        FindingClass.BLOCKING,
+                        "compatibility_level",
+                        "version_mismatch",
+                        f"Model compatibilityLevel {model_level} exceeds installed "
+                        f"Power BI Desktop level {detect_compatibility_level()}",
+                    ))
+                    gates.append(QAGateResult(
+                        "compatibility_level", GateStatus.FAILED, 1,
+                        f"level {model_level} > installed {detect_compatibility_level()}",
+                    ))
+                else:
+                    gates.append(QAGateResult("compatibility_level", GateStatus.PASSED))
             gates.append(QAGateResult("compile", GateStatus.PASSED))
         except Exception as exc:
             findings.append(QAFinding(

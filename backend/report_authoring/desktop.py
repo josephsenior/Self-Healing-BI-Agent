@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from .pbir import _report_root, validate_pbir_project
+from .desktop_version import detect_compatibility_level
 from .models import DashboardSpec, FieldRef
 
 
@@ -139,7 +140,7 @@ def _synthetic_model(spec: DashboardSpec | None) -> dict[str, Any]:
 
     return {
         "name": "Synthetic Qualification Model",
-        "compatibilityLevel": 1606,
+        "compatibilityLevel": detect_compatibility_level(),
         "model": {
             "culture": "en-US",
             "defaultPowerBIDataSourceVersion": "powerBI_V3",
@@ -242,6 +243,19 @@ def open_report_in_powerbi_desktop(report_path: str | Path) -> str:
         raise ValueError(f"refusing to open invalid PBIR report: {validation.to_dict()}")
     if not hasattr(os, "startfile"):
         raise RuntimeError("Power BI Desktop launch is supported only on Windows")
+    # Validate compatibility level before opening
+    from .desktop_version import detect_compatibility_level, validate_compatibility_level
+    model_path = report_root.parent / f"{report_root.name}.SemanticModel" / "model.bim"
+    if model_path.exists():
+        import json as _json
+        model = _json.loads(model_path.read_text(encoding="utf-8"))
+        model_level = model.get("compatibilityLevel", 0)
+        if not validate_compatibility_level(model_level):
+            raise ValueError(
+                f"Model compatibilityLevel {model_level} exceeds installed "
+                f"Power BI Desktop level {detect_compatibility_level()}. "
+                f"Update Power BI Desktop or regenerate the model."
+            )
     project_path = report_root.parent / f"{report_root.name.removesuffix('.Report')}.pbip"
     launch_path = project_path if project_path.is_file() else pbir_path
     os.startfile(str(launch_path))

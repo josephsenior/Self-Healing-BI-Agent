@@ -13,6 +13,8 @@ from typing import Any, Callable, Iterator
 
 import httpx
 
+from .desktop_version import detect_compatibility_level
+
 from .cloud import (
     FABRIC_API,
     FABRIC_SCOPE,
@@ -142,7 +144,7 @@ def synthetic_model_definition() -> dict[str, Any]:
     )
     return {
         "name": MODEL_DISPLAY_NAME,
-        "compatibilityLevel": 1606,
+        "compatibilityLevel": detect_compatibility_level(),
         "model": {
             "culture": "en-US",
             "defaultPowerBIDataSourceVersion": "powerBI_V3",

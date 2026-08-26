@@ -10,6 +10,7 @@ from typing import Any, Literal, Protocol
 from pydantic import Field
 from pydantic_settings import BaseSettings
 
+from .report_authoring.desktop_version import detect_compatibility_level
 from .report_authoring.semantic import CatalogField, CatalogTable, SemanticModelCatalog
 
 _IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,1023}$")
@@ -365,7 +366,7 @@ class BigQueryService:
 
         return {
             "name": f"{ref.table} BigQuery Model",
-            "compatibilityLevel": 1606,
+            "compatibilityLevel": detect_compatibility_level(),
             "model": {
                 "culture": "en-US",
                 "defaultPowerBIDataSourceVersion": "powerBI_V3",
@@ -466,7 +467,7 @@ class BigQueryService:
 
         return {
             "name": f"{ref.table} BigQuery Model",
-            "compatibilityLevel": 1606,
+            "compatibilityLevel": detect_compatibility_level(),
             "model": {
                 "culture": "en-US",
                 "defaultPowerBIDataSourceVersion": "powerBI_V3",

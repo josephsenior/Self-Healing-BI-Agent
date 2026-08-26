@@ -506,7 +506,9 @@ class DesktopVisualHandoffTests(unittest.TestCase):
                 "semanticModel/definitionProperties/1.0.0/schema.json",
             )
             self.assertEqual(definition["version"], "4.2")
-            self.assertEqual(payload["compatibilityLevel"], 1606)
+            # Verify compatibility level is a valid positive integer (detected from installed Desktop)
+            self.assertIsInstance(payload["compatibilityLevel"], int)
+            self.assertGreater(payload["compatibilityLevel"], 0)
             tables = {table["name"]: table for table in payload["model"]["tables"]}
             self.assertEqual(
                 {column["name"] for column in tables["Sales"]["columns"]},

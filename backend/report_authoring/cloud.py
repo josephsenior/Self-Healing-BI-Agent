@@ -393,6 +393,27 @@ class PowerBICloudClient:
             self.sleep(self.config.poll_interval_seconds)
         raise TimeoutError("semantic-model refresh exceeded the configured timeout")
 
+    @staticmethod
+    def _is_connector_model(model_dir: Path) -> bool:
+        """Return True if model.bim contains a live data-source connector (M expression)."""
+        model_bim = model_dir / "model.bim"
+        if not model_bim.is_file():
+            return False
+        try:
+            import json as _json
+            bim = _json.loads(model_bim.read_text(encoding="utf-8"))
+            for table in bim.get("model", {}).get("tables", []):
+                for partition in table.get("partitions", []):
+                    source = partition.get("source", {})
+                    if source.get("type") == "m":
+                        expr = source.get("expression", [])
+                        text = " ".join(expr) if isinstance(expr, list) else str(expr)
+                        if "GoogleBigQuery.Database" in text:
+                            return True
+        except Exception:
+            pass
+        return False
+
     def ensure_semantic_model(
         self,
         display_name: str,
@@ -403,6 +424,10 @@ class PowerBICloudClient:
 
         The local folder must contain definition.pbism and model.bim, exactly
         like the folders produced by bigquery_create_powerbi_semantic_model.
+
+        For connector (DirectQuery/import with M expression) models the refresh
+        is skipped because Fabric needs data-source credentials configured
+        separately. The caller should render after credentials are set up.
         """
         root = Path(model_dir).resolve()
         if not root.is_dir():
@@ -434,6 +459,7 @@ class PowerBICloudClient:
             ),
             None,
         )
+        is_connector = self._is_connector_model(root)
         if selected_id:
             response = self.client.post(
                 f"{FABRIC_API}/workspaces/{self.config.workspace_id}/semanticModels/"
@@ -443,14 +469,27 @@ class PowerBICloudClient:
             )
             _ensure_success(response, "update Power BI semantic model")
             self._complete_definition(response, expect_result=False)
-            refresh = self.refresh_model(selected_id)
-            return {
+            refresh = {}
+            if not is_connector:
+                refresh = self.refresh_model(selected_id)
+            result: dict[str, Any] = {
                 "action": "updated",
                 "workspace_id": self.config.workspace_id,
                 "semantic_model_id": selected_id,
                 "display_name": display_name,
-                "refresh": refresh,
             }
+            if refresh:
+                result["refresh"] = refresh
+            else:
+                result["refresh"] = {
+                    "status": "skipped",
+                    "reason": "connector model — data-source credentials required in Fabric",
+                    "setup_url": (
+                        f"https://app.fabric.microsoft.com/groups/"
+                        f"{self.config.workspace_id}/settings/connections"
+                    ),
+                }
+            return result
         response = self.client.post(
             f"{FABRIC_API}/workspaces/{self.config.workspace_id}/semanticModels",
             headers=self._headers(FABRIC_SCOPE),
@@ -463,14 +502,27 @@ class PowerBICloudClient:
             raise CloudAPIError(
                 "semantic-model create response did not include a semantic model id"
             )
-        refresh = self.refresh_model(model_id)
-        return {
+        refresh = {}
+        if not is_connector:
+            refresh = self.refresh_model(model_id)
+        created: dict[str, Any] = {
             "action": "created",
             "workspace_id": self.config.workspace_id,
             "semantic_model_id": model_id,
             "display_name": str(result.get("displayName") or display_name),
-            "refresh": refresh,
         }
+        if refresh:
+            created["refresh"] = refresh
+        else:
+            created["refresh"] = {
+                "status": "skipped",
+                "reason": "connector model — data-source credentials required in Fabric",
+                "setup_url": (
+                    f"https://app.fabric.microsoft.com/groups/"
+                    f"{self.config.workspace_id}/settings/connections"
+                ),
+            }
+        return created
 
     def semantic_catalog(self, semantic_model_id: str) -> SemanticModelCatalog:
         response = self.client.post(

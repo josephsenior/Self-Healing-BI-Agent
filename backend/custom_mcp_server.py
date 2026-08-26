@@ -238,8 +238,13 @@ def bigquery_semantic_catalog(table: str) -> str:
 def bigquery_create_powerbi_semantic_model(
     table: str,
     storage_mode: Literal["import", "directQuery", "embedded"] = "directQuery",
+    measures: list[dict[str, str]] | None = None,
 ) -> str:
     """Create a local PBIP semantic model. storage_mode is exactly import, directQuery, or embedded.
+
+    measures: list of {"name": str, "expression": str} dicts defining DAX measures.
+    Each measure gets a name (used in visuals) and a DAX expression (e.g. "SUM('table'[column])").
+    Pass an empty list or omit for no measures.
 
     Use embedded when the report must render with data in the Fabric cloud
     without configuring BigQuery data-source credentials or a gateway: rows are
@@ -251,6 +256,7 @@ def bigquery_create_powerbi_semantic_model(
         table,
         AUTHORING_ROOT / ".bigquery-models",
         storage_mode=storage_mode,
+        measures=measures,
     )
     return json.dumps({
         **result.to_dict(),

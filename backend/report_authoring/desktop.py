@@ -247,38 +247,51 @@ def open_report_in_powerbi_desktop(report_path: str | Path) -> str:
         raise ValueError(f"refusing to open invalid PBIR report: {validation.to_dict()}")
     if not hasattr(os, "startfile"):
         raise RuntimeError("Power BI Desktop launch is supported only on Windows")
-    # Full semantic model validation before launch (structure, compatibility, DAX/M syntax)
+    # A Fabric ``byConnection`` reference is valid for cloud publishing but is
+    # not an openable local PBIP project.  Launching one makes Desktop fail
+    # inside its live-connection bootstrap with the opaque ``serverName``
+    # assertion.  Require the local handoff explicitly instead.
     from .desktop_version import detect_compatibility_level, validate_compatibility_level
     from .pbir import validate_semantic_model
-    # Resolve actual model location from datasetReference (byPath) or fallback to sibling
-    import json as _json
     try:
-        pbir_doc = _json.loads(pbir_path.read_text(encoding="utf-8"))
-        by_path = pbir_doc.get("datasetReference", {}).get("byPath", {}).get("path")
-        if by_path:
-            candidate = (report_root / by_path).resolve()
-            model_dir = candidate if candidate.is_dir() else (report_root.parent / f"{report_root.name}.SemanticModel")
-        else:
-            model_dir = report_root.parent / f"{report_root.name}.SemanticModel"
-    except Exception:
-        model_dir = report_root.parent / f"{report_root.name}.SemanticModel"
-    if model_dir.is_dir():
+        pbir_doc = json.loads(pbir_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError("refusing to open unreadable definition.pbir") from exc
+
+    by_path = pbir_doc.get("datasetReference", {}).get("byPath", {}).get("path")
+    if not isinstance(by_path, str) or not by_path.strip():
+        raise ValueError(
+            "refusing to open a cloud-bound report in Power BI Desktop: "
+            "prepare_report_for_desktop must first bind it to a local "
+            ".SemanticModel using datasetReference.byPath"
+        )
+    model_dir = (report_root / by_path).resolve()
+    if not model_dir.is_dir():
+        raise ValueError(
+            "refusing to open report because its local semantic model does not exist: "
+            f"{model_dir}"
+        )
+
+    # Full semantic model validation before launch (structure, compatibility, DAX/M syntax).
+    try:
         model_report = validate_semantic_model(model_dir)
-        if not model_report.valid:
+    except Exception as exc:
+        raise ValueError(f"refusing to open invalid local semantic model: {exc}") from exc
+    if not model_report.valid:
+        raise ValueError(
+            f"refusing to open invalid local semantic model: {model_report.to_dict()}"
+        )
+    # Extra guard for the one fatal non-diagnostic Desktop crash.
+    model_bim = model_dir / "model.bim"
+    if model_bim.is_file():
+        model = json.loads(model_bim.read_text(encoding="utf-8"))
+        model_level = model.get("compatibilityLevel", 0)
+        if not validate_compatibility_level(model_level):
             raise ValueError(
-                f"Refusing to open: semantic model is invalid: {model_report.to_dict()}"
+                f"Model compatibilityLevel {model_level} exceeds installed "
+                f"Power BI Desktop level {detect_compatibility_level()}. "
+                f"Update Power BI Desktop or regenerate the model."
             )
-        # Extra guard for the one fatal non-diagnostic Desktop crash
-        model_bim = model_dir / "model.bim"
-        if model_bim.is_file():
-            model = _json.loads(model_bim.read_text(encoding="utf-8"))
-            model_level = model.get("compatibilityLevel", 0)
-            if not validate_compatibility_level(model_level):
-                raise ValueError(
-                    f"Model compatibilityLevel {model_level} exceeds installed "
-                    f"Power BI Desktop level {detect_compatibility_level()}. "
-                    f"Update Power BI Desktop or regenerate the model."
-                )
     project_path = report_root.parent / f"{report_root.name.removesuffix('.Report')}.pbip"
     launch_path = project_path if project_path.is_file() else pbir_path
     os.startfile(str(launch_path))

@@ -545,11 +545,24 @@ class DesktopVisualHandoffTests(unittest.TestCase):
     @unittest.skipUnless(sys.platform == "win32", "os.startfile is Windows-only")
     def test_desktop_open_uses_definition_pbir_file(self) -> None:
         with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as root:
+            model = ensure_staging_semantic_model(root, sample_spec())
             compiled = compile_report(sample_spec(), root)
+            prepare_report_for_desktop(compiled.report_path, model)
             with patch("backend.report_authoring.desktop.os.startfile") as startfile:
                 opened = open_report_in_powerbi_desktop(compiled.report_path)
             startfile.assert_called_once_with(opened)
             self.assertTrue(opened.endswith("Executive-Sales.pbip"))
+
+    def test_desktop_open_rejects_cloud_only_dataset_reference(self) -> None:
+        payload = sample_spec().model_dump()
+        payload["dataset"] = {"semantic_model_id": "cloud-model-id"}
+        cloud_spec = DashboardSpec.model_validate(payload)
+        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as root:
+            compiled = compile_report(cloud_spec, root)
+            with patch("backend.report_authoring.desktop.os.startfile", create=True) as startfile:
+                with self.assertRaisesRegex(ValueError, "cloud-bound report"):
+                    open_report_in_powerbi_desktop(compiled.report_path)
+            startfile.assert_not_called()
 
 
 class StatefulDashboardWorkspaceTests(unittest.TestCase):

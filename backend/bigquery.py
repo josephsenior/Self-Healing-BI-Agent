@@ -383,6 +383,7 @@ class BigQueryService:
                                 },
                             }
                         ],
+                        "measures": self._auto_measures(ref, fields),
                     }
                 ],
             },
@@ -487,28 +488,138 @@ class BigQueryService:
                                 },
                             }
                         ],
-                        "measures": [
-                            {
-                                "name": "Total Revenue",
-                                "expression": f"SUM('{ref.table}'[revenue])",
-                            },
-                            {
-                                "name": "Total Orders",
-                                "expression": f"DISTINCTCOUNT('{ref.table}'[order_id])",
-                            },
-                            {
-                                "name": "Average Order Value",
-                                "expression": f"DIVIDE([Total Revenue], [Total Orders])",
-                            },
-                            {
-                                "name": "Margin Rate",
-                                "expression": f"DIVIDE(SUM('{ref.table}'[gross_profit]), [Total Revenue])",
-                            },
-                        ],
+                        "measures": self._auto_measures(ref, fields),
                     }
                 ],
             },
         }
+
+    def _auto_measures(self, ref: TableReference, fields: Any) -> list[dict[str, str]]:
+        """Generate DAX measures from BigQuery schema by detecting column roles.
+
+        Pattern-matches column names to infer business semantics:
+        - revenue/sales/amount/price → SUM measure
+        - order_id/transaction_id → DISTINCTCOUNT measure
+        - cost/profit/margin → SUM or calculated measures
+        - quantity/count → SUM measure
+        - percentage/rate/pct → AVERAGE or DIVIDE measure
+        """
+        measures: list[dict[str, str]] = []
+        table = ref.table
+        numeric_cols = [
+            f for f in fields
+            if f.field_type.upper() in {"INT64", "INTEGER", "FLOAT64", "FLOAT", "NUMERIC", "BIGNUMERIC"}
+            and not f.name.endswith("_id")
+        ]
+        string_cols = [
+            f for f in fields
+            if f.field_type.upper() in {"STRING", "BYTES"}
+        ]
+        date_cols = [
+            f for f in fields
+            if f.field_type.upper() in {"DATE", "DATETIME", "TIMESTAMP"}
+        ]
+
+        revenue_col = self._detect_column(numeric_cols, [
+            "revenue", "sales", "amount", "total", "price", "income",
+            "chiffre_affaires", "ca", "ventes", "montant",
+        ])
+        if revenue_col:
+            measures.append({
+                "name": "Total Revenue",
+                "expression": f"SUM('{table}'[{revenue_col.name}])",
+            })
+
+        cost_col = self._detect_column(numeric_cols, [
+            "cost", "cogs", "cost_of_goods", "expenses", "cout", "cout_revient",
+        ])
+        if cost_col and revenue_col:
+            measures.append({
+                "name": "Total Cost",
+                "expression": f"SUM('{table}'[{cost_col.name}])",
+            })
+            measures.append({
+                "name": "Total Margin",
+                "expression": "[Total Revenue] - [Total Cost]",
+            })
+            measures.append({
+                "name": "Margin Rate",
+                "expression": "DIVIDE([Total Margin], [Total Revenue])",
+            })
+        elif revenue_col:
+            gp_col = self._detect_column(numeric_cols, [
+                "gross_profit", "profit", "marge", "benefice",
+            ])
+            if gp_col:
+                measures.append({
+                    "name": "Total Margin",
+                    "expression": f"SUM('{table}'[{gp_col.name}])",
+                })
+                measures.append({
+                    "name": "Margin Rate",
+                    "expression": "DIVIDE([Total Margin], [Total Revenue])",
+                })
+
+        order_col = self._detect_column(
+            [f for f in fields if f.name.endswith("_id")],
+            ["order_id", "transaction_id", "commande_id", "facture_id"],
+        )
+        if order_col:
+            measures.append({
+                "name": "Total Orders",
+                "expression": f"DISTINCTCOUNT('{table}'[{order_col.name}])",
+            })
+        if revenue_col and order_col:
+            measures.append({
+                "name": "Average Order Value",
+                "expression": "DIVIDE([Total Revenue], [Total Orders])",
+            })
+
+        qty_col = self._detect_column(numeric_cols, [
+            "quantity", "qty", "nombre", "nbre", "units",
+        ])
+        if qty_col:
+            measures.append({
+                "name": "Total Quantity",
+                "expression": f"SUM('{table}'[{qty_col.name}])",
+            })
+
+        user_col = self._detect_column(
+            [f for f in fields if f.name.endswith("_id")],
+            ["user_id", "customer_id", "client_id", "utilisateur_id"],
+        )
+        if user_col:
+            measures.append({
+                "name": "Total Customers",
+                "expression": f"DISTINCTCOUNT('{table}'[{user_col.name}])",
+            })
+
+        discount_col = self._detect_column(numeric_cols, [
+            "discount", "remise", "reduction",
+        ])
+        if discount_col and revenue_col:
+            measures.append({
+                "name": "Total Discount",
+                "expression": f"SUM('{table}'[{discount_col.name}])",
+            })
+
+        return measures
+
+    @staticmethod
+    def _detect_column(
+        candidates: list[Any],
+        keywords: list[str],
+    ) -> Any | None:
+        """Find the first column whose name matches any keyword (case-insensitive)."""
+        for keyword in keywords:
+            for col in candidates:
+                if col.name.lower() == keyword:
+                    return col
+        for keyword in keywords:
+            for col in candidates:
+                if keyword in col.name.lower():
+                    return col
+        return None
 
     def query(self, sql: str, max_rows: int | None = None) -> dict[str, Any]:
         normalized = sql.strip()

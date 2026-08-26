@@ -1,6 +1,7 @@
 """Run the local backend and frontend with one command: python start.py."""
 from __future__ import annotations
 
+import os
 import shutil
 import socket
 import subprocess
@@ -8,9 +9,12 @@ import sys
 import time
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 
 ROOT = Path(__file__).resolve().parent
 FRONTEND = ROOT / "frontend"
+load_dotenv(ROOT / ".env")
 
 
 def port_is_open(port: int) -> bool:
@@ -20,10 +24,19 @@ def port_is_open(port: int) -> bool:
 
 
 def main() -> int:
-    if not port_is_open(6379):
-        print("Memurai is not reachable on 127.0.0.1:6379.", file=sys.stderr)
-        print("Start the Memurai Windows service, then retry.", file=sys.stderr)
+    redis_required = os.getenv("REDIS_REQUIRED", "false").strip().lower() in {
+        "1", "true", "yes", "on"
+    }
+    redis_available = port_is_open(6379)
+    if redis_required and not redis_available:
+        print("Redis is required but not reachable on 127.0.0.1:6379.", file=sys.stderr)
+        print("Start Redis or Memurai, then retry.", file=sys.stderr)
         return 1
+    if not redis_available:
+        print(
+            "Redis is not reachable; starting with non-durable in-memory conversation state.",
+            file=sys.stderr,
+        )
 
     occupied = [str(port) for port in (8000, 3000) if port_is_open(port)]
     if occupied:
@@ -66,7 +79,11 @@ def main() -> int:
         print("\nApplication started:")
         print("  UI:      http://localhost:3000")
         print("  Backend: http://127.0.0.1:8000/api/health")
-        print("  State:   Memurai on 127.0.0.1:6379")
+        print(
+            "  State:   Redis on 127.0.0.1:6379"
+            if redis_available
+            else "  State:   in-memory (set REDIS_REQUIRED=true to require Redis)"
+        )
         print("\nPress Ctrl+C to stop both servers.\n")
 
         while True:

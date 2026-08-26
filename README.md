@@ -80,7 +80,7 @@ The agent autonomously:
 |-------------|---------|-------|
 | Python | 3.11+ | |
 | Node.js | 18+ | `winget install OpenJS.NodeJS` on Windows |
-| Redis / Memurai | Any | `winget install Memurai.Memurai` on Windows |
+| Redis / Memurai | Any | Optional for local use; enables durable conversation state. `winget install Memurai.Memurai` on Windows. |
 | Power BI Desktop | Latest | For local report preview (optional) |
 | GCP Service Account | — | For BigQuery integration (optional) |
 
@@ -117,7 +117,7 @@ python start.py
 ```
 
 This single command:
-- Verifies Redis is running on port 6379
+- Uses Redis on port 6379 when available; otherwise starts with non-durable in-memory conversation state (`REDIS_REQUIRED=false`)
 - Starts FastAPI backend on `http://127.0.0.1:8000`
 - Starts Next.js frontend on `http://localhost:3000`
 

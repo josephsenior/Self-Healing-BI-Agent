@@ -78,7 +78,13 @@ def _detect_store_version() -> str | None:
 
 def _detect_traditional_version() -> str | None:
     """Detect Power BI Desktop traditional installer version via registry."""
-    import winreg
+    # ``winreg`` is a Windows-only standard-library module.  Compatibility
+    # generation is also used by CI and cloud-only workflows, where Desktop
+    # is not installed, so a missing registry must simply mean "not found".
+    try:
+        import winreg
+    except ImportError:
+        return None
     try:
         key = winreg.OpenKey(
             winreg.HKEY_LOCAL_MACHINE,

@@ -70,17 +70,20 @@ def _projection(
     field: FieldRef,
     *,
     aggregate_column: bool = False,
+    agg_function: int = 0,
     active: bool | None = None,
 ) -> dict[str, Any]:
+    _AGG_NAMES = {0: "Sum", 1: "Count", 2: "Min", 3: "Max", 4: "Average", 5: "DistinctCount"}
     if field.kind == "column" and aggregate_column:
+        agg_name = _AGG_NAMES.get(agg_function, "Sum")
         expression = {
             "Aggregation": {
                 "Expression": _field_expression(field),
-                "Function": 0,
+                "Function": agg_function,
             }
         }
-        query_ref = f"Sum({field.query_ref})"
-        native_query_ref = f"Sum of {field.name}"
+        query_ref = f"{agg_name}({field.query_ref})"
+        native_query_ref = f"{agg_name} of {field.name}"
     else:
         expression = _field_expression(field)
         query_ref = field.query_ref
@@ -93,6 +96,16 @@ def _projection(
     if active is not None:
         value["active"] = active
     return value
+
+
+def _detect_agg_function(field: FieldRef) -> int:
+    """Detect aggregation function from field name: DistinctCount for IDs, Sum otherwise."""
+    name_lower = field.name.lower()
+    if name_lower.endswith("_id") or name_lower == "id":
+        return 5  # DistinctCount
+    if field.kind == "measure":
+        return -1  # No aggregation for measures
+    return 0  # Sum
 
 
 def _query_state(spec: VisualSpec) -> dict[str, Any]:
@@ -110,6 +123,7 @@ def _query_state(spec: VisualSpec) -> dict[str, Any]:
                 _projection(
                     item,
                     aggregate_column=role in aggregate_roles,
+                    agg_function=_detect_agg_function(item),
                     active=True
                     if role == "Values" and spec.visual_type == "slicer"
                     else None,

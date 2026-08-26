@@ -678,7 +678,9 @@ class BigQueryService:
     def _catalog_from_schema(
         self, ref: TableReference, fields: Any
     ) -> SemanticModelCatalog:
-        return SemanticModelCatalog(tables=[CatalogTable(name=ref.table, columns=[CatalogField(name=field.name, data_type=self._powerbi_type(field.field_type)) for field in fields])])
+        columns = [CatalogField(name=field.name, data_type=self._powerbi_type(field.field_type)) for field in fields]
+        measures = [CatalogField(name=m["name"], data_type="measure") for m in self._auto_measures(ref, fields)]
+        return SemanticModelCatalog(tables=[CatalogTable(name=ref.table, columns=columns, measures=measures)])
 
     @staticmethod
     def _schema_field(field: Any) -> dict[str, Any]:

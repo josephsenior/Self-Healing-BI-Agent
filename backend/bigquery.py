@@ -95,25 +95,6 @@ def _validate_model_definition(model: dict[str, Any]) -> None:
             _validate_m_expression(expression)
 
 
-def _infer_measure_format(measure: dict[str, str]) -> str | None:
-    """Infer formatString for a measure based on name and expression patterns.
-
-    Returns a Power BI format string (e.g. "0.0%") for common ratio/percentage
-    patterns, or None if no inference is possible. This prevents measures like
-    "Margin %" from rendering as 0.72 instead of 72.0%.
-    """
-    name = measure.get("name", "").casefold()
-    expression = measure.get("expression", "").casefold()
-    # Percentage patterns: name contains %, rate, ratio, margin %, etc.
-    pct_name_tokens = ("%", "rate", "ratio", "margin percent", "growth")
-    if any(token in name for token in pct_name_tokens):
-        return "0.0%"
-    # DIVIDE() in expression strongly implies a ratio/percentage
-    if "divide(" in expression:
-        return "0.0%"
-    return None
-
-
 class BigQuerySettings(BaseSettings):
     project_id: str = Field(default="", alias="BIGQUERY_PROJECT_ID")
     location: str = Field(default="", alias="BIGQUERY_LOCATION")
@@ -293,22 +274,10 @@ class BigQueryService:
         )
         model_dir.mkdir(parents=True, exist_ok=True)
 
-        # Auto-detect formatString for measures that lack one (e.g. percentage ratios)
-        normalized_measures = None
-        if measures:
-            normalized_measures = []
-            for m in measures:
-                entry = dict(m)
-                if "formatString" not in entry:
-                    inferred = _infer_measure_format(entry)
-                    if inferred:
-                        entry["formatString"] = inferred
-                normalized_measures.append(entry)
-
         if storage_mode == "embedded":
-            model = self._embedded_model(ref, fields, catalog, measures=normalized_measures)
+            model = self._embedded_model(ref, fields, catalog, measures=measures)
         else:
-            model = self._connector_model(ref, fields, storage_mode, measures=normalized_measures)
+            model = self._connector_model(ref, fields, storage_mode, measures=measures)
 
         _validate_model_definition(model)
         self._write_json(
@@ -460,13 +429,9 @@ class BigQueryService:
                 return "null"
             normalized = field_type.upper()
             if normalized == "DATE":
-                if hasattr(value, "strftime"):
-                    return f'"{value.strftime("%Y-%m-%d")}"'
-                return f'"{str(value)}"'
+                return f'"{value.strftime("%Y-%m-%d")}"'
             if normalized in {"DATETIME", "TIMESTAMP"}:
-                if hasattr(value, "strftime"):
-                    return f'"{value.strftime("%Y-%m-%d %H:%M:%S")}"'
-                return f'"{str(value)}"'
+                return f'"{value.strftime("%Y-%m-%d %H:%M:%S")}"'
             if isinstance(value, bool):
                 return "true" if value else "false"
             if isinstance(value, (int, float)):

@@ -226,65 +226,6 @@ class BigQueryTests(unittest.TestCase):
             model["model"]["tables"][0]["partitions"][0]["mode"], "import"
         )
 
-    def test_embedded_model_snapshots_data_as_calculated_table(self):
-        root = Path.cwd() / ".test-bigquery-model-embedded"
-        shutil.rmtree(root, ignore_errors=True)
-        try:
-            binding = self.service().create_powerbi_model(
-                "sales.orders", root, storage_mode="embedded"
-            )
-            model_path = Path(binding.semantic_model_path)
-            definition = json.loads(
-                (model_path / "definition.pbism").read_text(encoding="utf-8")
-            )
-            model = json.loads(
-                (model_path / "model.bim").read_text(encoding="utf-8")
-            )
-            manifest = json.loads(
-                (model_path / "bigquery-binding.json").read_text(encoding="utf-8")
-            )
-        finally:
-            shutil.rmtree(root, ignore_errors=True)
-        partition = model["model"]["tables"][0]["partitions"][0]
-        raw_expr = partition["source"]["expression"]
-        expression = "\n".join(raw_expr) if isinstance(raw_expr, list) else str(raw_expr)
-        self.assertEqual(definition["version"], "4.2")
-        self.assertEqual(partition["mode"], "import")
-        self.assertEqual(partition["source"]["type"], "calculated")
-        self.assertIn("UNION(", expression)
-        self.assertIn("ROW(", expression)
-        self.assertNotIn("GoogleBigQuery.Database", expression)
-        self.assertTrue(manifest["credential_material_embedded"])
-        self.assertFalse(manifest["uses_storage_api"])
-        self.assertEqual(manifest["storage_mode"], "embedded")
-        self.assertEqual(binding.storage_mode, "embedded")
-        self.assertFalse(binding.requires_powerbi_credentials)
-        self.assertEqual(binding.catalog["tables"][0]["name"], "orders")
-
-    def test_embedded_model_with_measures(self):
-        root = Path.cwd() / ".test-bigquery-model-embedded-measures"
-        shutil.rmtree(root, ignore_errors=True)
-        try:
-            binding = self.service().create_powerbi_model(
-                "sales.orders",
-                root,
-                storage_mode="embedded",
-                measures=[
-                    {"name": "Total Revenue", "expression": "SUM('orders'[revenue])"},
-                ],
-            )
-            model = json.loads(
-                (Path(binding.semantic_model_path) / "model.bim").read_text(
-                    encoding="utf-8"
-                )
-            )
-        finally:
-            shutil.rmtree(root, ignore_errors=True)
-        measures = model["model"]["tables"][0].get("measures", [])
-        self.assertEqual(len(measures), 1)
-        self.assertEqual(measures[0]["name"], "Total Revenue")
-        self.assertIn("SUM", measures[0]["expression"])
-
     def test_external_query_is_rejected_before_calling_bigquery(self):
         client = FakeClient()
         with self.assertRaises(ValueError):

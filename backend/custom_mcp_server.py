@@ -237,7 +237,8 @@ def bigquery_semantic_catalog(table: str) -> str:
 @mcp.tool()
 def bigquery_create_powerbi_semantic_model(
     table: str,
-    storage_mode: Literal["import", "directQuery", "embedded"] = "embedded",
+    storage_mode: Literal["import", "directQuery", "embedded"] = "directQuery",
+    measures: list[dict[str, str]] | None = None,
 ) -> str:
     """Create a local PBIP semantic model. storage_mode is exactly import, directQuery, or embedded.
 
@@ -245,11 +246,11 @@ def bigquery_create_powerbi_semantic_model(
     Each measure gets a name (used in visuals) and a DAX expression (e.g. "SUM('table'[column])").
     Pass an empty list or omit for no measures.
 
-    Default is embedded: rows are snapshotted from BigQuery into a calculated
-    table so Fabric cloud renders work with real data and no credentials/gateway.
-    Use import/directQuery only when a live BigQuery connection is explicitly
-    desired (renders empty in the cloud unless Fabric data-source credentials
-    and a gateway are configured).
+    Use embedded when the report must render with data in the Fabric cloud
+    without configuring BigQuery data-source credentials or a gateway: rows are
+    snapshotted into the model, so cloud renders work with no external
+    connection. import/directQuery keep a live BigQuery connector and require
+    cloud data-source credentials when rendered in Fabric.
     """
     result = _bigquery_service().create_powerbi_model(
         table,

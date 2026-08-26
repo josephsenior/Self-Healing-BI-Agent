@@ -139,7 +139,7 @@ def _synthetic_model(spec: DashboardSpec | None) -> dict[str, Any]:
 
     return {
         "name": "Synthetic Qualification Model",
-        "compatibilityLevel": 1600,
+        "compatibilityLevel": 1606,
         "model": {
             "culture": "en-US",
             "defaultPowerBIDataSourceVersion": "powerBI_V3",

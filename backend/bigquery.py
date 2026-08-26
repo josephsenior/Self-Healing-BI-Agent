@@ -365,7 +365,7 @@ class BigQueryService:
 
         return {
             "name": f"{ref.table} BigQuery Model",
-            "compatibilityLevel": 1600,
+            "compatibilityLevel": 1606,
             "model": {
                 "culture": "en-US",
                 "defaultPowerBIDataSourceVersion": "powerBI_V3",
@@ -466,7 +466,7 @@ class BigQueryService:
 
         return {
             "name": f"{ref.table} BigQuery Model",
-            "compatibilityLevel": 1600,
+            "compatibilityLevel": 1606,
             "model": {
                 "culture": "en-US",
                 "defaultPowerBIDataSourceVersion": "powerBI_V3",

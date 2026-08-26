@@ -142,7 +142,7 @@ def synthetic_model_definition() -> dict[str, Any]:
     )
     return {
         "name": MODEL_DISPLAY_NAME,
-        "compatibilityLevel": 1600,
+        "compatibilityLevel": 1606,
         "model": {
             "culture": "en-US",
             "defaultPowerBIDataSourceVersion": "powerBI_V3",

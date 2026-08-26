@@ -615,21 +615,12 @@ def create_powerbi_cloud_semantic_model(
         model_root,
         known_id=semantic_model_id or None,
     )
-    next_action = (
-        "Pass the returned semantic_model_id to publish_pbir_to_fabric "
-        "so the report definition references the cloud semantic model."
-    )
-    if result.get("refresh", {}).get("status") == "skipped":
-        next_action = (
-            "Connector model published — refresh was skipped. "
-            "Configure BigQuery data-source credentials in the Fabric workspace "
-            "before rendering: " + result["refresh"]["setup_url"] + " "
-            "Once credentials are set up, re-run create_powerbi_cloud_semantic_model "
-            "to trigger a refresh, or proceed to publish_pbir_to_fabric."
-        )
     return json.dumps({
         **result,
-        "next_action": next_action,
+        "next_action": (
+            "Pass the returned semantic_model_id to publish_pbir_to_fabric "
+            "so the report definition references the cloud semantic model."
+        ),
     }, indent=2)
 
 

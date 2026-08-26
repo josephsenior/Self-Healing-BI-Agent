@@ -423,8 +423,6 @@ class BigQueryService:
         if not rows:
             raise ValueError(f"BigQuery table {ref.full_name!r} returned no rows to embed")
 
-        field_by_name = {field.name: field for field in fields}
-
         def m_literal(value: Any, field_type: str) -> str:
             if value is None:
                 return "null"

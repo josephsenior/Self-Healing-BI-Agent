@@ -6,7 +6,15 @@
 [![LangGraph](https://img.shields.io/badge/LangGraph-1.0+-orange.svg)](https://langchain-ai.github.io/langgraph/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-orange.svg)](LICENSE)
 
-> **An autonomous, end-to-end AI agent** that transforms natural language business questions into fully-qualified Power BI dashboards — querying BigQuery, building semantic models, authoring PBIR reports, running visual QA, and publishing to Microsoft Fabric. All from a single chat interface.
+> **A conversational business-intelligence agent** that turns natural-language questions into live, governed Power BI dashboards. It explores BigQuery data, builds DirectQuery semantic models, authors PBIR reports, runs visual QA, and can publish to Microsoft Fabric—all from one chat workspace.
+
+---
+
+## ▶️ Product Demo
+
+[![Watch the 3-minute demo](docs/assets/demo-preview.jpg)](Demo-blueprinta-5x.mp4)
+
+Click the preview to open the full [3-minute product walkthrough](Demo-blueprinta-5x.mp4).
 
 ---
 
@@ -17,7 +25,7 @@ You type: *"Create a sales performance dashboard by region and product category 
 The agent autonomously:
 
 1. 🔍 **Queries BigQuery** — runs SQL, profiles columns, builds a semantic catalog
-2. 🧠 **Creates a Power BI Semantic Model** — DirectQuery or Import, with proper relationships
+2. 🧠 **Creates a Power BI Semantic Model** — live BigQuery DirectQuery only; no imports or embedded snapshots
 3. 📊 **Authors PBIR Report** — multi-page layouts, KPIs, charts, slicers in structured JSON
 4. ✅ **Runs Visual QA** — validates layout, semantics, quality, and official PBIR schemas
 5. 🖥️ **Opens in Power BI Desktop** — one-click local preview with live data

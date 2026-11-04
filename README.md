@@ -12,9 +12,7 @@
 
 ## ▶️ Product Demo
 
-[![Watch the 3-minute demo](docs/assets/demo-preview.jpg)](https://github.com/josephsenior/Self-Healing-BI-Agent/blob/main/Demo-blueprinta-5x.mp4)
-
-Click the preview to watch the full [3-minute product walkthrough](https://github.com/josephsenior/Self-Healing-BI-Agent/blob/main/Demo-blueprinta-5x.mp4).
+<video controls width="100%" src="https://github.com/user-attachments/assets/7fe8a7a0-afd3-44b0-8c28-e55e3e4dbe98"></video>
 
 ---
 

@@ -1,20 +1,20 @@
-# 🔶 Data Analysis Agent
+# 🛡️ Self-Healing BI Agent
 
-[![CI](https://github.com/josephsenior/Data-Analysis-Agent/actions/workflows/ci.yml/badge.svg)](https://github.com/josephsenior/Data-Analysis-Agent/actions/workflows/ci.yml)
+[![CI](https://github.com/josephsenior/Self-Healing-BI-Agent/actions/workflows/ci.yml/badge.svg)](https://github.com/josephsenior/Self-Healing-BI-Agent/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-orange.svg)](https://www.python.org/downloads/)
 [![Next.js 14](https://img.shields.io/badge/Next.js-14-black.svg)](https://nextjs.org/)
 [![LangGraph](https://img.shields.io/badge/LangGraph-1.0+-orange.svg)](https://langchain-ai.github.io/langgraph/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-orange.svg)](LICENSE)
 
-> **A conversational business-intelligence agent** that turns natural-language questions into live, governed Power BI dashboards. It explores BigQuery data, builds DirectQuery semantic models, authors PBIR reports, runs visual QA, and can publish to Microsoft Fabric—all from one chat workspace.
+> **A reliability-first, self-healing BI agent by Youssef Mejdi.** It turns natural-language questions into live, governed Power BI dashboards from BigQuery, then validates, diagnoses, and corrects report defects through bounded recovery loops. Durable checkpoints, transient-service retries, and versioned rollback help keep the workflow resilient—from question to Fabric publication.
 
 ---
 
 ## ▶️ Product Demo
 
-[![Watch the 3-minute demo](docs/assets/demo-preview.jpg)](Demo-blueprinta-5x.mp4)
+[![Watch the 3-minute demo](docs/assets/demo-preview.jpg)](https://github.com/josephsenior/Self-Healing-BI-Agent/blob/main/Demo-blueprinta-5x.mp4)
 
-Click the preview to open the full [3-minute product walkthrough](Demo-blueprinta-5x.mp4).
+Click the preview to watch the full [3-minute product walkthrough](https://github.com/josephsenior/Self-Healing-BI-Agent/blob/main/Demo-blueprinta-5x.mp4).
 
 ---
 
@@ -30,6 +30,17 @@ The agent autonomously:
 4. ✅ **Runs Visual QA** — validates layout, semantics, quality, and official PBIR schemas
 5. 🖥️ **Opens in Power BI Desktop** — one-click local preview with live data
 6. ☁️ **Publishes to Microsoft Fabric** — deploys directly to your staging workspace
+
+### 🛡️ Reliability, Recovery & Self-Healing
+
+The agent treats report generation as a recoverable workflow, not a one-shot prompt:
+
+- **Quality gates before promotion** reject invalid PBIR, semantic, or visual candidates instead of presenting them as verified.
+- **Finding-driven repair** feeds structured QA diagnostics back into bounded revision attempts; unresolved or review-only findings stop safely for human attention.
+- **Versioned recovery** preserves dashboard history and supports rollback to a known-good version.
+- **Resilient execution** uses durable Redis checkpoints, per-thread worker coordination, and bounded retries for transient cloud API failures.
+- **Honest status reporting** distinguishes verified reports, warnings, blocked reviews, and unavailable checks.
+
 
 ---
 

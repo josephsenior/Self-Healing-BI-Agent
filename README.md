@@ -12,7 +12,7 @@
 
 ## ▶️ Product Demo
 
-![](VIDEO_ATTACHMENT_URL_FROM_PR)
+<video controls width="100%" src="https://github.com/user-attachments/assets/7fe8a7a0-afd3-44b0-8c28-e55e3e4dbe98"></video>
 
 ---
 

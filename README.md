@@ -12,7 +12,9 @@
 
 ## ▶️ Product Demo
 
-<video controls width="100%" src="https://github.com/user-attachments/assets/7fe8a7a0-afd3-44b0-8c28-e55e3e4dbe98"></video>
+[![Watch the 3-minute demo](docs/assets/demo-preview.gif)](Demo-blueprinta-5x.mp4)
+
+The animated preview plays inline; click it to open the full [3-minute product walkthrough](Demo-blueprinta-5x.mp4).
 
 ---
 
